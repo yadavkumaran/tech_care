@@ -80,7 +80,7 @@ public class WebSecurityConfig {
         http.authenticationProvider(authenticationProvider());
         http.addFilterBefore(authTokenFilter, UsernamePasswordAuthenticationFilter.class);
 
-        return http;
+        return http.build();
     }
 }
 

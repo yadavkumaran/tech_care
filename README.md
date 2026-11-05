@@ -188,3 +188,4 @@ When presenting TechCare to evaluators, highlight these 4 architectural decision
    *`repair_ticket_logs` creates an unalterable paper trail of who changed the status, at what exact timestamp, and with what customer communication remarks.*
 4. **Why decouple `payments` from `invoices` in a 1-to-many relationship?**  
    *Enables real-world split payments, advance deposits at check-in, and partial payments with outstanding receivable tracking.*
+
