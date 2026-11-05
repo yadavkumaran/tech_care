@@ -1,0 +1,430 @@
+{
+	"info": {
+		"_postman_id": "techcare-api-v1",
+		"name": "TechCare REST API Collection",
+		"description": "Complete Postman collection for TechCare Computer Service Center Management System",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080/api",
+			"type": "string"
+		},
+		{
+			"key": "token",
+			"value": "",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "1. Authentication",
+			"item": [
+				{
+					"name": "Login (Admin)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"var jsonData = pm.response.json();",
+									"if (jsonData.success && jsonData.data && jsonData.data.token) {",
+									"    pm.collectionVariables.set('token', jsonData.data.token);",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"username\": \"admin\",\n  \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/auth/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "login"]
+						}
+					}
+				},
+				{
+					"name": "Get Current User Profile",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/auth/me",
+							"host": ["{{baseUrl}}"],
+							"path": ["auth", "me"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "2. Dashboard",
+			"item": [
+				{
+					"name": "Get Dashboard KPIs & Recent Tickets",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/dashboard/stats",
+							"host": ["{{baseUrl}}"],
+							"path": ["dashboard", "stats"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "3. Customer & Device Management",
+			"item": [
+				{
+					"name": "Get All Customers (with optional search)",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/customers?search=Ananya",
+							"host": ["{{baseUrl}}"],
+							"path": ["customers"],
+							"query": [
+								{
+									"key": "search",
+									"value": "Ananya"
+								}
+							]
+						}
+					}
+				},
+				{
+					"name": "Create Customer",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"fullName\": \"Rahul Sharma\",\n  \"phone\": \"+91 9988776655\",\n  \"email\": \"rahul.sharma@example.com\",\n  \"address\": \"Koramangala 4th Block, Bangalore\",\n  \"taxId\": null\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/customers",
+							"host": ["{{baseUrl}}"],
+							"path": ["customers"]
+						}
+					}
+				},
+				{
+					"name": "Register Customer Device",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": 1,\n  \"deviceType\": \"LAPTOP\",\n  \"brand\": \"Lenovo\",\n  \"modelName\": \"ThinkPad X1 Carbon Gen 9\",\n  \"serialNumber\": \"TP-X1-889922\",\n  \"devicePassword\": \"thinkpad123\",\n  \"physicalCondition\": \"Light wear on trackpad, screen clean\",\n  \"accessoriesReceived\": \"65W USB-C Charger\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/devices",
+							"host": ["{{baseUrl}}"],
+							"path": ["devices"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "4. Repair Ticket Lifecycle",
+			"item": [
+				{
+					"name": "Get All Tickets",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/tickets",
+							"host": ["{{baseUrl}}"],
+							"path": ["tickets"]
+						}
+					}
+				},
+				{
+					"name": "Intake New Repair Ticket",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": 1,\n  \"deviceId\": 1,\n  \"assignedTechnicianId\": 3,\n  \"problemReported\": \"Laptop battery not charging past 1%\",\n  \"priority\": \"HIGH\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/tickets",
+							"host": ["{{baseUrl}}"],
+							"path": ["tickets"]
+						}
+					}
+				},
+				{
+					"name": "Update Ticket Diagnosis & Estimate",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"diagnosticNotes\": \"Battery cells degraded to 20% health. Replacement 3-cell 42Wh battery required.\",\n  \"estimatedCost\": 2800.00,\n  \"laborCharge\": 400.00\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/tickets/1/diagnosis",
+							"host": ["{{baseUrl}}"],
+							"path": ["tickets", "1", "diagnosis"]
+						}
+					}
+				},
+				{
+					"name": "Transition Status (e.g. READY_FOR_DELIVERY)",
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"status\": \"READY_FOR_DELIVERY\",\n  \"remarks\": \"Testing passed. Battery charges to 100% and holds 5 hours runtime.\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/tickets/1/status",
+							"host": ["{{baseUrl}}"],
+							"path": ["tickets", "1", "status"]
+						}
+					}
+				},
+				{
+					"name": "Consume Spare Part from Inventory",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"itemId\": 1,\n  \"quantity\": 1\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/tickets/1/consume-part",
+							"host": ["{{baseUrl}}"],
+							"path": ["tickets", "1", "consume-part"]
+						}
+					}
+				},
+				{
+					"name": "Get Ticket Audit History Logs",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/tickets/1/logs",
+							"host": ["{{baseUrl}}"],
+							"path": ["tickets", "1", "logs"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "5. Inventory Management",
+			"item": [
+				{
+					"name": "Get All Inventory Items",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/inventory",
+							"host": ["{{baseUrl}}"],
+							"path": ["inventory"]
+						}
+					}
+				},
+				{
+					"name": "Get Low Stock Alerts",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/inventory/alerts/low-stock",
+							"host": ["{{baseUrl}}"],
+							"path": ["inventory", "alerts", "low-stock"]
+						}
+					}
+				},
+				{
+					"name": "Get Item Stock Movements Ledger",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/inventory/1/movements",
+							"host": ["{{baseUrl}}"],
+							"path": ["inventory", "1", "movements"]
+						}
+					}
+				}
+			]
+		},
+		{
+			"name": "6. Billing & Payments",
+			"item": [
+				{
+					"name": "Generate Invoice from Repair Ticket",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"customerId\": 1,\n  \"repairTicketId\": 1,\n  \"invoiceType\": \"REPAIR\",\n  \"taxRate\": 18.00,\n  \"discountAmount\": 0.00\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/invoices",
+							"host": ["{{baseUrl}}"],
+							"path": ["invoices"]
+						}
+					}
+				},
+				{
+					"name": "Record Payment (UPI / Cash / Card)",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"invoiceId\": 1,\n  \"amount\": 3400.00,\n  \"paymentMethod\": \"UPI\",\n  \"paymentType\": \"FINAL_SETTLEMENT\",\n  \"transactionNotes\": \"Paid via Google Pay UTR: 890123849102\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/payments",
+							"host": ["{{baseUrl}}"],
+							"path": ["payments"]
+						}
+					}
+				}
+			]
+		}
+	]
+}
+
