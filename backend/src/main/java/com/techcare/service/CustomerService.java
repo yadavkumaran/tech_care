@@ -69,5 +69,15 @@ public class CustomerService {
 
         return customerRepository.save(customer);
     }
+
+    @Transactional
+    public void deleteCustomer(Long id) {
+        Customer customer = getCustomerById(id);
+        try {
+            customerRepository.delete(customer);
+        } catch (Exception e) {
+            throw new BadRequestException("Cannot delete customer because they have linked repair tickets, devices, or invoices.");
+        }
+    }
 }
 

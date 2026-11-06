@@ -1,5 +1,6 @@
 package com.techcare.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.techcare.entity.enums.TicketPriority;
 import com.techcare.entity.enums.TicketStatus;
 import jakarta.persistence.*;
@@ -17,6 +18,7 @@ import java.time.LocalDateTime;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class RepairTicket {
 
     @Id

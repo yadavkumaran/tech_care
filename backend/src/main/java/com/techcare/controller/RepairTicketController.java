@@ -129,5 +129,12 @@ public class RepairTicketController {
         List<TicketAttachment> attachments = ticketService.getAttachments(id);
         return ResponseEntity.ok(ApiResponse.success(attachments));
     }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteTicket(@PathVariable Long id) {
+        ticketService.deleteTicket(id);
+        return ResponseEntity.ok(ApiResponse.success("Repair ticket deleted successfully", null));
+    }
 }
 

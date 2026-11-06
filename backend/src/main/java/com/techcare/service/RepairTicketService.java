@@ -260,5 +260,11 @@ public class RepairTicketService {
     public List<TicketAttachment> getAttachments(Long ticketId) {
         return attachmentRepository.findByTicketId(ticketId);
     }
+
+    @Transactional
+    public void deleteTicket(Long ticketId) {
+        RepairTicket ticket = getTicketById(ticketId);
+        ticketRepository.delete(ticket);
+    }
 }
 

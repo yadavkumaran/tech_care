@@ -9,6 +9,7 @@ import {
   ReceiptText,
   LogOut,
   Cpu,
+  UserCheck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -62,6 +63,16 @@ export const Sidebar: React.FC = () => {
           >
             <Truck size={18} />
             <span>Vendors & Purchases</span>
+          </NavLink>
+        )}
+
+        {hasRole('ADMIN') && (
+          <NavLink
+            to="/staff"
+            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+          >
+            <UserCheck size={18} />
+            <span>Staff & Technicians</span>
           </NavLink>
         )}
 

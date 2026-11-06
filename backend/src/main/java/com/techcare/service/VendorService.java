@@ -45,5 +45,34 @@ public class VendorService {
 
         return vendorRepository.save(vendor);
     }
+
+    @Transactional
+    public Vendor updateVendor(Long id, VendorRequest request) {
+        Vendor vendor = getVendorById(id);
+
+        if (!vendor.getPhone().equals(request.getPhone()) && vendorRepository.findByPhone(request.getPhone()).isPresent()) {
+            throw new BadRequestException("Vendor with phone number " + request.getPhone() + " already exists");
+        }
+
+        vendor.setCompanyName(request.getCompanyName());
+        vendor.setContactPerson(request.getContactPerson());
+        vendor.setPhone(request.getPhone());
+        vendor.setEmail(request.getEmail());
+        vendor.setAddress(request.getAddress());
+        vendor.setTaxId(request.getTaxId());
+
+        return vendorRepository.save(vendor);
+    }
+
+    @Transactional
+    public void deleteVendor(Long id) {
+        Vendor vendor = getVendorById(id);
+        try {
+            vendorRepository.delete(vendor);
+        } catch (Exception e) {
+            vendor.setIsActive(false);
+            vendorRepository.save(vendor);
+        }
+    }
 }
 

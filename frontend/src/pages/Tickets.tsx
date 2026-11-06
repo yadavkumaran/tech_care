@@ -9,6 +9,7 @@ import {
   Package,
   History,
   FileText,
+  Trash2,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import api from '../api/client';
@@ -239,6 +240,18 @@ export const Tickets: React.FC = () => {
     }
   };
 
+  const handleDeleteTicket = async (t: RepairTicket) => {
+    if (window.confirm(`Are you sure you want to delete ticket #${t.ticketNumber}? This will remove all associated logs and records.`)) {
+      try {
+        await api.delete(`/tickets/${t.id}`);
+        alert(`Ticket #${t.ticketNumber} deleted successfully`);
+        fetchTickets();
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Error deleting ticket');
+      }
+    }
+  };
+
   const filteredTickets = tickets.filter((t) => {
     const matchesSearch =
       t.ticketNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -366,12 +379,24 @@ export const Tickets: React.FC = () => {
                         <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Labor: ₹{Number(t.laborCharge || 0).toFixed(2)}</div>
                       </td>
                       <td>
-                        <button
-                          className="btn btn-outline btn-sm"
-                          onClick={() => openTicketDetails(t)}
-                        >
-                          Manage
-                        </button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            onClick={() => openTicketDetails(t)}
+                          >
+                            Manage
+                          </button>
+                          {hasRole('ADMIN') && (
+                            <button
+                              className="btn btn-outline btn-sm"
+                              style={{ color: '#ef4444' }}
+                              title="Delete Ticket"
+                              onClick={() => handleDeleteTicket(t)}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))

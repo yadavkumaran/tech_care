@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Search, AlertTriangle, Layers, SlidersHorizontal } from 'lucide-react';
+import { Plus, Search, AlertTriangle, SlidersHorizontal, Edit, Trash2 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import api from '../api/client';
 import { ApiResponse, InventoryItem } from '../types';
@@ -11,8 +11,11 @@ export const Inventory: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
 
-  // New Item Modal
+  // New & Edit Item Modal
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [isEditingItem, setIsEditingItem] = useState(false);
+  const [editingItemId, setEditingItemId] = useState<number | null>(null);
+
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
   const [category, setCategory] = useState('SSD');
@@ -47,29 +50,9 @@ export const Inventory: React.FC = () => {
     }
   };
 
-  const handleCreateItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await api.post('/inventory', {
-        sku,
-        name,
-        category,
-        costPrice: Number(costPrice),
-        sellingPrice: Number(sellingPrice),
-        currentStock: Number(currentStock),
-        reorderLevel: Number(reorderLevel),
-      });
-
-      setShowCreateModal(false);
-      resetCreateForm();
-      fetchInventory();
-      alert('Inventory item created successfully!');
-    } catch (err: any) {
-      alert(err.response?.data?.message || 'Error creating inventory item');
-    }
-  };
-
-  const resetCreateForm = () => {
+  const openCreateModal = () => {
+    setIsEditingItem(false);
+    setEditingItemId(null);
     setSku('');
     setName('');
     setCategory('SSD');
@@ -77,6 +60,66 @@ export const Inventory: React.FC = () => {
     setSellingPrice('');
     setCurrentStock('0');
     setReorderLevel('5');
+    setShowCreateModal(true);
+  };
+
+  const openEditModal = (item: InventoryItem) => {
+    setIsEditingItem(true);
+    setEditingItemId(item.id);
+    setSku(item.sku);
+    setName(item.name);
+    setCategory(item.category);
+    setCostPrice(String(item.costPrice));
+    setSellingPrice(String(item.sellingPrice));
+    setCurrentStock(String(item.currentStock));
+    setReorderLevel(String(item.reorderLevel));
+    setShowCreateModal(true);
+  };
+
+  const handleSaveItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (isEditingItem && editingItemId) {
+        await api.put(`/inventory/${editingItemId}`, {
+          sku,
+          name,
+          category,
+          costPrice: Number(costPrice),
+          sellingPrice: Number(sellingPrice),
+          currentStock: Number(currentStock),
+          reorderLevel: Number(reorderLevel),
+        });
+        alert('Inventory item updated successfully!');
+      } else {
+        await api.post('/inventory', {
+          sku,
+          name,
+          category,
+          costPrice: Number(costPrice),
+          sellingPrice: Number(sellingPrice),
+          currentStock: Number(currentStock),
+          reorderLevel: Number(reorderLevel),
+        });
+        alert('Inventory item created successfully!');
+      }
+
+      setShowCreateModal(false);
+      fetchInventory();
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Error saving inventory item');
+    }
+  };
+
+  const handleDeleteItem = async (item: InventoryItem) => {
+    if (window.confirm(`Are you sure you want to delete or deactivate "${item.name}"?`)) {
+      try {
+        await api.delete(`/inventory/${item.id}`);
+        alert('Inventory item removed or marked inactive');
+        fetchInventory();
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Error deleting inventory item');
+      }
+    }
   };
 
   const handleAdjustStock = async (e: React.FormEvent) => {
@@ -129,7 +172,7 @@ export const Inventory: React.FC = () => {
             </button>
 
             {hasRole('ADMIN') && (
-              <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
+              <button className="btn btn-primary" onClick={openCreateModal}>
                 <Plus size={18} />
                 <span>Add New Part / Item</span>
               </button>
@@ -172,13 +215,34 @@ export const Inventory: React.FC = () => {
                         <td style={{ color: '#64748b' }}>₹{Number(item.costPrice).toFixed(2)}</td>
                         <td style={{ fontWeight: 600, color: '#0f172a' }}>₹{Number(item.sellingPrice).toFixed(2)}</td>
                         <td>
-                          <button
-                            className="btn btn-outline btn-sm"
-                            onClick={() => setAdjustingItem(item)}
-                          >
-                            <SlidersHorizontal size={14} />
-                            <span>Adjust</span>
-                          </button>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              className="btn btn-outline btn-sm"
+                              title="Adjust Stock Quantity"
+                              onClick={() => setAdjustingItem(item)}
+                            >
+                              <SlidersHorizontal size={14} />
+                            </button>
+                            {hasRole('ADMIN') && (
+                              <>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  title="Edit Part Details"
+                                  onClick={() => openEditModal(item)}
+                                >
+                                  <Edit size={14} />
+                                </button>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  style={{ color: '#ef4444' }}
+                                  title="Delete Item"
+                                  onClick={() => handleDeleteItem(item)}
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -196,18 +260,21 @@ export const Inventory: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL 1: ADD NEW INVENTORY ITEM */}
+      {/* MODAL 1: ADD / EDIT INVENTORY ITEM */}
       {showCreateModal && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 style={{ margin: '0 0 16px 0' }}>Add Spare Part to Inventory</h3>
-            <form onSubmit={handleCreateItem}>
+            <h3 style={{ margin: '0 0 16px 0' }}>
+              {isEditingItem ? `Edit Part: ${name}` : 'Add Spare Part to Inventory'}
+            </h3>
+            <form onSubmit={handleSaveItem}>
               <div className="form-group">
                 <label className="form-label">SKU Code *</label>
                 <input
                   type="text"
                   className="form-control"
                   required
+                  disabled={isEditingItem}
                   placeholder="e.g. SKU-SSD-500NVME"
                   value={sku}
                   onChange={(e) => setSku(e.target.value)}
@@ -242,6 +309,7 @@ export const Inventory: React.FC = () => {
                     <option value="KEYBOARD">Keyboard</option>
                     <option value="ADAPTER">Adapter / Charger</option>
                     <option value="MOTHERBOARD">Motherboard</option>
+                    <option value="COOLING">Cooling</option>
                     <option value="ACCESSORY">Accessory</option>
                     <option value="CONSUMABLE">Consumable (Paste/Solder)</option>
                   </select>
@@ -259,17 +327,19 @@ export const Inventory: React.FC = () => {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <label className="form-label">Initial Stock</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    required
-                    value={currentStock}
-                    onChange={(e) => setCurrentStock(e.target.value)}
-                  />
-                </div>
+              <div style={{ display: 'grid', gridTemplateColumns: isEditingItem ? '1fr 1fr' : '1fr 1fr 1fr', gap: 12 }}>
+                {!isEditingItem && (
+                  <div className="form-group">
+                    <label className="form-label">Initial Stock</label>
+                    <input
+                      type="number"
+                      className="form-control"
+                      required
+                      value={currentStock}
+                      onChange={(e) => setCurrentStock(e.target.value)}
+                    />
+                  </div>
+                )}
 
                 <div className="form-group">
                   <label className="form-label">Cost Price (₹)</label>
@@ -307,7 +377,7 @@ export const Inventory: React.FC = () => {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Save Item
+                  {isEditingItem ? 'Save Changes' : 'Save Item'}
                 </button>
               </div>
             </form>
@@ -368,4 +438,3 @@ export const Inventory: React.FC = () => {
     </>
   );
 };
-

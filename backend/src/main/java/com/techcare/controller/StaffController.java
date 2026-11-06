@@ -1,14 +1,15 @@
 package com.techcare.controller;
 
+import com.techcare.dto.request.StaffRequest;
 import com.techcare.dto.response.ApiResponse;
 import com.techcare.entity.User;
-import com.techcare.entity.enums.Role;
-import com.techcare.repository.UserRepository;
+import com.techcare.service.StaffService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
@@ -17,12 +18,46 @@ import java.util.List;
 @RequiredArgsConstructor
 public class StaffController {
 
-    private final UserRepository userRepository;
+    private final StaffService staffService;
+
+    @GetMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<List<User>>> getAllStaff() {
+        return ResponseEntity.ok(ApiResponse.success(staffService.getAllStaff()));
+    }
 
     @GetMapping("/technicians")
     public ResponseEntity<ApiResponse<List<User>>> getTechnicians() {
-        List<User> technicians = userRepository.findByRoleAndIsActiveTrue(Role.TECHNICIAN);
-        return ResponseEntity.ok(ApiResponse.success(technicians));
+        return ResponseEntity.ok(ApiResponse.success(staffService.getActiveTechnicians()));
+    }
+
+    @GetMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<User>> getStaffById(@PathVariable Long id) {
+        return ResponseEntity.ok(ApiResponse.success(staffService.getStaffById(id)));
+    }
+
+    @PostMapping
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<User>> createStaff(@Valid @RequestBody StaffRequest request) {
+        User created = staffService.createStaff(request);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.success("Staff member created successfully", created));
+    }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<User>> updateStaff(
+            @PathVariable Long id,
+            @Valid @RequestBody StaffRequest request) {
+        User updated = staffService.updateStaff(id, request);
+        return ResponseEntity.ok(ApiResponse.success("Staff member updated successfully", updated));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteStaff(@PathVariable Long id) {
+        staffService.deleteStaff(id);
+        return ResponseEntity.ok(ApiResponse.success("Staff member deleted or deactivated successfully", null));
     }
 }
-

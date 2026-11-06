@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Search, User, Laptop, Phone, Mail, MapPin } from 'lucide-react';
+import { Plus, Search, User, Laptop, Phone, Edit, Trash2 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import api from '../api/client';
 import { ApiResponse, Customer, CustomerDevice } from '../types';
@@ -9,8 +9,11 @@ export const Customers: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Modal State
+  // Modal State (Create & Edit)
   const [showModal, setShowModal] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -45,29 +48,67 @@ export const Customers: React.FC = () => {
     fetchCustomers(searchTerm);
   };
 
-  const handleCreateCustomer = async (e: React.FormEvent) => {
+  const openCreateModal = () => {
+    setIsEditing(false);
+    setEditingId(null);
+    setFullName('');
+    setPhone('');
+    setEmail('');
+    setAddress('');
+    setTaxId('');
+    setShowModal(true);
+  };
+
+  const openEditModal = (c: Customer) => {
+    setIsEditing(true);
+    setEditingId(c.id);
+    setFullName(c.fullName);
+    setPhone(c.phone);
+    setEmail(c.email || '');
+    setAddress(c.address || '');
+    setTaxId(c.taxId || '');
+    setShowModal(true);
+  };
+
+  const handleSaveCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await api.post<ApiResponse<Customer>>('/customers', {
-        fullName,
-        phone,
-        email: email || undefined,
-        address: address || undefined,
-        taxId: taxId || undefined,
-      });
-
-      if (res.data.success) {
-        setShowModal(false);
-        setFullName('');
-        setPhone('');
-        setEmail('');
-        setAddress('');
-        setTaxId('');
-        fetchCustomers();
+      if (isEditing && editingId) {
+        await api.put(`/customers/${editingId}`, {
+          fullName,
+          phone,
+          email: email || undefined,
+          address: address || undefined,
+          taxId: taxId || undefined,
+        });
+        alert('Customer details updated successfully!');
+      } else {
+        await api.post('/customers', {
+          fullName,
+          phone,
+          email: email || undefined,
+          address: address || undefined,
+          taxId: taxId || undefined,
+        });
         alert('Customer registered successfully!');
       }
+
+      setShowModal(false);
+      fetchCustomers();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Error registering customer');
+      alert(err.response?.data?.message || 'Error saving customer');
+    }
+  };
+
+  const handleDeleteCustomer = async (c: Customer) => {
+    if (window.confirm(`Are you sure you want to delete customer "${c.fullName}"?`)) {
+      try {
+        await api.delete(`/customers/${c.id}`);
+        alert('Customer deleted successfully');
+        fetchCustomers();
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Error deleting customer');
+      }
     }
   };
 
@@ -101,7 +142,7 @@ export const Customers: React.FC = () => {
             </button>
           </form>
 
-          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+          <button className="btn btn-primary" onClick={openCreateModal}>
             <Plus size={18} />
             <span>Register New Customer</span>
           </button>
@@ -139,20 +180,38 @@ export const Customers: React.FC = () => {
                       <td>
                         <span style={{ fontSize: '0.85rem', color: '#64748b' }}>{c.email || '—'}</span>
                       </td>
-                      <td style={{ maxWidth: 240, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <td style={{ maxWidth: 220, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {c.address || '—'}
                       </td>
                       <td style={{ fontSize: '0.85rem', color: '#64748b' }}>
                         {new Date(c.createdAt).toLocaleDateString()}
                       </td>
                       <td>
-                        <button
-                          className="btn btn-outline btn-sm"
-                          onClick={() => viewDevices(c)}
-                        >
-                          <Laptop size={14} />
-                          <span>Devices</span>
-                        </button>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            title="View Devices"
+                            onClick={() => viewDevices(c)}
+                          >
+                            <Laptop size={14} />
+                            <span>Devices</span>
+                          </button>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            title="Edit Customer"
+                            onClick={() => openEditModal(c)}
+                          >
+                            <Edit size={14} />
+                          </button>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            style={{ color: '#ef4444' }}
+                            title="Delete Customer"
+                            onClick={() => handleDeleteCustomer(c)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -169,12 +228,14 @@ export const Customers: React.FC = () => {
         </div>
       </div>
 
-      {/* MODAL: REGISTER CUSTOMER */}
+      {/* MODAL: REGISTER / EDIT CUSTOMER */}
       {showModal && (
         <div className="modal-overlay">
           <div className="modal-content">
-            <h3 style={{ margin: '0 0 16px 0' }}>Register Customer Profile</h3>
-            <form onSubmit={handleCreateCustomer}>
+            <h3 style={{ margin: '0 0 16px 0' }}>
+              {isEditing ? `Edit Customer: ${fullName}` : 'Register New Customer Profile'}
+            </h3>
+            <form onSubmit={handleSaveCustomer}>
               <div className="form-group">
                 <label className="form-label">Full Name *</label>
                 <input
@@ -230,7 +291,7 @@ export const Customers: React.FC = () => {
                   Cancel
                 </button>
                 <button type="submit" className="btn btn-primary">
-                  Save Customer
+                  {isEditing ? 'Save Changes' : 'Save Customer'}
                 </button>
               </div>
             </form>
@@ -294,4 +355,3 @@ export const Customers: React.FC = () => {
     </>
   );
 };
-

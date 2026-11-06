@@ -22,3 +22,4 @@ Write-Host "`nAll services initiated!" -ForegroundColor Yellow
 Write-Host "Frontend: http://localhost:5173" -ForegroundColor White
 Write-Host "Backend API: http://localhost:8080/api" -ForegroundColor White
 Write-Host "Default Logins: admin / receptionist / tech_arun (Password: password123)`n" -ForegroundColor White
+

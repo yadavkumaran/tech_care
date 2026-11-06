@@ -37,5 +37,21 @@ public class VendorController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Vendor created successfully", vendor));
     }
+
+    @PutMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Vendor>> updateVendor(
+            @PathVariable Long id,
+            @Valid @RequestBody VendorRequest request) {
+        Vendor updated = vendorService.updateVendor(id, request);
+        return ResponseEntity.ok(ApiResponse.success("Vendor updated successfully", updated));
+    }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteVendor(@PathVariable Long id) {
+        vendorService.deleteVendor(id);
+        return ResponseEntity.ok(ApiResponse.success("Vendor deleted successfully", null));
+    }
 }
 

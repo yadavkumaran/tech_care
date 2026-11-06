@@ -129,5 +129,17 @@ public class InventoryService {
     public List<StockMovement> getItemMovements(Long itemId) {
         return stockMovementRepository.findByItemIdOrderByCreatedAtDesc(itemId);
     }
+
+    @Transactional
+    public void deleteItem(Long id) {
+        InventoryItem item = getItemById(id);
+        try {
+            inventoryRepository.delete(item);
+        } catch (Exception e) {
+            // Soft-deactivate if referenced in past tickets, purchases, or ledger
+            item.setIsActive(false);
+            inventoryRepository.save(item);
+        }
+    }
 }
 

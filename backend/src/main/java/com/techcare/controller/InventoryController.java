@@ -81,5 +81,12 @@ public class InventoryController {
         List<StockMovement> movements = inventoryService.getItemMovements(id);
         return ResponseEntity.ok(ApiResponse.success(movements));
     }
+
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Void>> deleteItem(@PathVariable Long id) {
+        inventoryService.deleteItem(id);
+        return ResponseEntity.ok(ApiResponse.success("Inventory item deleted or deactivated successfully", null));
+    }
 }
 

@@ -8,6 +8,7 @@ import { Tickets } from './pages/Tickets';
 import { Customers } from './pages/Customers';
 import { Inventory } from './pages/Inventory';
 import { Purchases } from './pages/Purchases';
+import { Staff } from './pages/Staff';
 import { Billing } from './pages/Billing';
 
 // Protected Route Component
@@ -59,6 +60,14 @@ export const App: React.FC = () => {
               element={
                 <RoleRoute requiredRole="ADMIN">
                   <Purchases />
+                </RoleRoute>
+              }
+            />
+            <Route
+              path="staff"
+              element={
+                <RoleRoute requiredRole="ADMIN">
+                  <Staff />
                 </RoleRoute>
               }
             />
