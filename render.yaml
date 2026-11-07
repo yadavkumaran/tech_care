@@ -27,8 +27,9 @@ services:
   # ---------------------------------------------------------------------------
   # 2. TechCare Frontend Web App (React / Vite Static Site)
   # ---------------------------------------------------------------------------
-  - type: static
+  - type: web
     name: techcare-frontend
+    env: static
     rootDir: frontend
     buildCommand: npm install && npm run build
     staticPublishPath: dist
