@@ -21,8 +21,6 @@ services:
         sync: false
       - key: TECHCARE_JWT_EXPIRATION_MS
         value: 86400000
-      - key: TECHCARE_DEVICE_PIN_KEY
-        sync: false
 
   # ---------------------------------------------------------------------------
   # 2. TechCare Frontend Web App (React / Vite Static Site)
