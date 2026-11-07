@@ -1,25 +1,74 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
-import { ShieldCheck } from 'lucide-react';
+import { ShieldCheck, Menu } from 'lucide-react';
+import { Badge } from './ui/Badge';
 
-export const Navbar: React.FC<{ title: string }> = ({ title }) => {
+interface NavbarProps {
+  title: string;
+  subtitle?: string;
+  onOpenMobile?: () => void;
+  actions?: React.ReactNode;
+}
+
+export const Navbar: React.FC<NavbarProps> = ({
+  title,
+  subtitle,
+  onOpenMobile,
+  actions,
+}) => {
   const { user } = useAuth();
-  const roleName = user?.roles[0]?.replace('ROLE_', '') || 'STAFF';
+  const rawRole = user?.roles[0]?.replace('ROLE_', '') || 'STAFF';
+
+  // Format badge variant based on role
+  const getRoleVariant = (role: string) => {
+    switch (role) {
+      case 'ADMIN':
+        return 'danger';
+      case 'TECHNICIAN':
+        return 'info';
+      case 'RECEPTIONIST':
+        return 'success';
+      default:
+        return 'neutral';
+    }
+  };
 
   return (
     <header className="navbar">
-      <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#0f172a' }}>
-        {title}
+      <div className="navbar-left">
+        {onOpenMobile && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            onClick={onOpenMobile}
+            style={{ display: 'flex' }}
+            aria-label="Open navigation menu"
+          >
+            <Menu size={18} />
+          </button>
+        )}
+        <div>
+          <div className="navbar-title">{title}</div>
+          {subtitle && (
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', marginTop: -2 }}>
+              {subtitle}
+            </div>
+          )}
+        </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ShieldCheck size={18} color="#2563eb" />
-          <span className="badge badge-info">{roleName}</span>
+      <div className="navbar-right">
+        {actions}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Badge variant={getRoleVariant(rawRole)}>
+            <ShieldCheck size={12} style={{ marginRight: 2 }} />
+            {rawRole}
+          </Badge>
+          <div style={{ fontSize: '0.86rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {user?.fullName}
+          </div>
         </div>
-        <div style={{ fontSize: '0.9rem', fontWeight: 600 }}>{user?.fullName}</div>
       </div>
     </header>
   );
 };
-

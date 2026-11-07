@@ -31,7 +31,7 @@ public class VendorController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Vendor>> createVendor(@Valid @RequestBody VendorRequest request) {
         Vendor vendor = vendorService.createVendor(request);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -39,7 +39,7 @@ public class VendorController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Vendor>> updateVendor(
             @PathVariable Long id,
             @Valid @RequestBody VendorRequest request) {
@@ -48,7 +48,7 @@ public class VendorController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Void>> deleteVendor(@PathVariable Long id) {
         vendorService.deleteVendor(id);
         return ResponseEntity.ok(ApiResponse.success("Vendor deleted successfully", null));

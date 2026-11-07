@@ -2,9 +2,13 @@ package com.techcare.service;
 
 import com.techcare.dto.request.CustomerRequest;
 import com.techcare.entity.Customer;
+import com.techcare.entity.CustomerDevice;
 import com.techcare.exception.BadRequestException;
 import com.techcare.exception.ResourceNotFoundException;
+import com.techcare.repository.CustomerDeviceRepository;
 import com.techcare.repository.CustomerRepository;
+import com.techcare.repository.InvoiceRepository;
+import com.techcare.repository.RepairTicketRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,6 +20,9 @@ import java.util.List;
 public class CustomerService {
 
     private final CustomerRepository customerRepository;
+    private final CustomerDeviceRepository deviceRepository;
+    private final RepairTicketRepository ticketRepository;
+    private final InvoiceRepository invoiceRepository;
 
     @Transactional(readOnly = true)
     public List<Customer> getAllCustomers() {
@@ -73,10 +80,32 @@ public class CustomerService {
     @Transactional
     public void deleteCustomer(Long id) {
         Customer customer = getCustomerById(id);
+
+        if (ticketRepository.existsByCustomerId(id)) {
+            throw new BadRequestException("Cannot delete customer '" + customer.getFullName() + 
+                    "' because they have historical repair tickets associated with their account.");
+        }
+        if (invoiceRepository.existsByCustomerId(id)) {
+            throw new BadRequestException("Cannot delete customer '" + customer.getFullName() + 
+                    "' because billing invoices exist for this customer.");
+        }
+
+        List<CustomerDevice> customerDevices = deviceRepository.findByCustomerId(id);
+        for (CustomerDevice d : customerDevices) {
+            if (ticketRepository.existsByDeviceId(d.getId())) {
+                throw new BadRequestException("Cannot delete customer '" + customer.getFullName() + 
+                        "' because their device '" + d.getBrand() + " " + d.getModelName() + "' is linked to repair tickets.");
+            }
+        }
+        // Remove unlinked devices first to satisfy referential integrity
+        if (!customerDevices.isEmpty()) {
+            deviceRepository.deleteAll(customerDevices);
+        }
+
         try {
             customerRepository.delete(customer);
         } catch (Exception e) {
-            throw new BadRequestException("Cannot delete customer because they have linked repair tickets, devices, or invoices.");
+            throw new BadRequestException("Cannot delete customer because linked records exist.");
         }
     }
 }

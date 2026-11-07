@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import { useOutletContext, useNavigate } from 'react-router-dom';
 import {
   Plus,
   Search,
-  Filter,
   CheckCircle,
   Clock,
   Wrench,
@@ -10,8 +10,25 @@ import {
   History,
   FileText,
   Trash2,
+  Lock,
+  Unlock,
+  Laptop,
+  AlertCircle,
+  ArrowRight,
+  ShieldAlert,
+  Sliders,
+  DollarSign,
+  Tag,
+  Eye,
+  Phone,
+  User as UserIcon,
+  Loader2,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
+import { SearchInput } from '../components/ui/SearchInput';
+import { Badge, BadgeVariant } from '../components/ui/Badge';
+import { Modal } from '../components/ui/Modal';
+import { EmptyState } from '../components/ui/EmptyState';
 import api from '../api/client';
 import {
   ApiResponse,
@@ -21,9 +38,13 @@ import {
   RepairTicket,
   TicketLog,
   TicketStatus,
+  TicketPriority,
   User,
 } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
+import { useSync, useRealtimeSync } from '../context/SyncContext';
+import { LayoutContextType } from '../components/Layout';
 
 export const Tickets: React.FC = () => {
   const [tickets, setTickets] = useState<RepairTicket[]>([]);
@@ -40,16 +61,20 @@ export const Tickets: React.FC = () => {
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | ''>('');
   const [selectedTechId, setSelectedTechId] = useState<number | ''>('');
   const [problemReported, setProblemReported] = useState('');
-  const [priority, setPriority] = useState('MEDIUM');
+  const [priority, setPriority] = useState<TicketPriority>('MEDIUM');
 
   // New Customer & Device quick form inside Intake modal
   const [isNewCustomer, setIsNewCustomer] = useState(false);
+  const [isNewDeviceForExistingCustomer, setIsNewDeviceForExistingCustomer] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
   const [newDevBrand, setNewDevBrand] = useState('HP');
   const [newDevModel, setNewDevModel] = useState('');
   const [newDevSerial, setNewDevSerial] = useState('');
   const [newDevType, setNewDevType] = useState('LAPTOP');
+  const [newDevPassword, setNewDevPassword] = useState('');
+  const [newDevCondition, setNewDevCondition] = useState('');
+  const [newDevAccessories, setNewDevAccessories] = useState('');
 
   // Ticket Detail & Action Modal State
   const [activeTicket, setActiveTicket] = useState<RepairTicket | null>(null);
@@ -68,15 +93,28 @@ export const Tickets: React.FC = () => {
   const [selectedPartId, setSelectedPartId] = useState<number | ''>('');
   const [partQty, setPartQty] = useState(1);
 
-  const { hasRole } = useAuth();
+  const [revealedPin, setRevealedPin] = useState<string | null>(null);
+  const [loadingPin, setLoadingPin] = useState(false);
+
+  // Button loading states for instant responsive feedback
+  const [submittingIntake, setSubmittingIntake] = useState(false);
+  const [savingDiagnosis, setSavingDiagnosis] = useState(false);
+  const [submittingStatus, setSubmittingStatus] = useState(false);
+  const [consumingPart, setConsumingPart] = useState(false);
+
+  const { user, hasRole } = useAuth();
+  const { toast } = useToast();
+  const { broadcastLocalUpdate } = useSync();
+  const outletContext = useOutletContext<LayoutContextType | null>();
+  const navigate = useNavigate();
 
   useEffect(() => {
-    fetchTickets();
+    fetchTickets(true);
     loadTechsAndInventory();
   }, [selectedStatus]);
 
-  const fetchTickets = async () => {
-    setLoading(true);
+  const fetchTickets = async (showLoading = true) => {
+    if (showLoading) setLoading(true);
     try {
       let url = '/tickets';
       if (selectedStatus !== 'ALL') {
@@ -89,9 +127,14 @@ export const Tickets: React.FC = () => {
     } catch (err) {
       console.error('Failed to load tickets', err);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
+
+  // Real-time synchronization: silently refresh on external updates, other roles' mutations, or window resume
+  useRealtimeSync(['TICKET', 'CUSTOMER', 'DEVICE'], () => {
+    fetchTickets(false);
+  });
 
   const loadTechsAndInventory = async () => {
     try {
@@ -111,10 +154,21 @@ export const Tickets: React.FC = () => {
   const handleCustomerChange = async (customerId: number) => {
     setSelectedCustomerId(customerId);
     setSelectedDeviceId('');
+    if (!customerId) {
+      setDevices([]);
+      setIsNewDeviceForExistingCustomer(false);
+      return;
+    }
     try {
       const res = await api.get<ApiResponse<CustomerDevice[]>>(`/devices/customer/${customerId}`);
       if (res.data.success) {
-        setDevices(res.data.data);
+        const fetched = res.data.data;
+        setDevices(fetched);
+        if (fetched.length === 0) {
+          setIsNewDeviceForExistingCustomer(true);
+        } else {
+          setIsNewDeviceForExistingCustomer(false);
+        }
       }
     } catch (err) {
       console.error('Failed to load customer devices', err);
@@ -123,6 +177,7 @@ export const Tickets: React.FC = () => {
 
   const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmittingIntake(true);
     try {
       let custId = selectedCustomerId;
       let devId = selectedDeviceId;
@@ -141,6 +196,26 @@ export const Tickets: React.FC = () => {
           brand: newDevBrand,
           modelName: newDevModel,
           serialNumber: newDevSerial,
+          devicePassword: newDevPassword || undefined,
+          physicalCondition: newDevCondition || undefined,
+          accessoriesReceived: newDevAccessories || undefined,
+        });
+        devId = devRes.data.data.id;
+      } else if (isNewDeviceForExistingCustomer || !selectedDeviceId) {
+        if (!newDevBrand.trim() || !newDevModel.trim()) {
+          toast.warning('Please enter brand and model name for the new device.');
+          setSubmittingIntake(false);
+          return;
+        }
+        const devRes = await api.post<ApiResponse<CustomerDevice>>('/devices', {
+          customerId: custId,
+          deviceType: newDevType,
+          brand: newDevBrand,
+          modelName: newDevModel,
+          serialNumber: newDevSerial,
+          devicePassword: newDevPassword || undefined,
+          physicalCondition: newDevCondition || undefined,
+          accessoriesReceived: newDevAccessories || undefined,
         });
         devId = devRes.data.data.id;
       }
@@ -156,9 +231,12 @@ export const Tickets: React.FC = () => {
       setShowIntakeModal(false);
       resetIntakeForm();
       fetchTickets();
-      alert('Repair job ticket created successfully!');
+      broadcastLocalUpdate('TICKET', 'CREATED');
+      toast.success('Repair job ticket created successfully!');
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Error creating repair ticket');
+      toast.error(err.response?.data?.message || 'Error creating repair ticket');
+    } finally {
+      setSubmittingIntake(false);
     }
   };
 
@@ -168,19 +246,26 @@ export const Tickets: React.FC = () => {
     setSelectedTechId('');
     setProblemReported('');
     setIsNewCustomer(false);
+    setIsNewDeviceForExistingCustomer(false);
     setNewCustName('');
     setNewCustPhone('');
     setNewDevBrand('HP');
     setNewDevModel('');
     setNewDevSerial('');
+    setNewDevType('LAPTOP');
+    setNewDevPassword('');
+    setNewDevCondition('');
+    setNewDevAccessories('');
+    setPriority('MEDIUM');
   };
 
   const openTicketDetails = async (ticket: RepairTicket) => {
     setActiveTicket(ticket);
+    setRevealedPin(null);
     setDiagNotes(ticket.diagnosticNotes || '');
     setEstCost(ticket.estimatedCost ? String(ticket.estimatedCost) : '');
     setLaborCharge(ticket.laborCharge ? String(ticket.laborCharge) : '');
-    setNewStatus(ticket.status);
+    setNewStatus('');
     setStatusRemarks('');
 
     try {
@@ -195,141 +280,293 @@ export const Tickets: React.FC = () => {
 
   const handleUpdateDiagnosis = async () => {
     if (!activeTicket) return;
+    setSavingDiagnosis(true);
     try {
       await api.patch(`/tickets/${activeTicket.id}/diagnosis`, {
         diagnosticNotes: diagNotes,
         estimatedCost: estCost ? Number(estCost) : 0,
         laborCharge: laborCharge ? Number(laborCharge) : 0,
       });
-      alert('Diagnosis updated successfully');
+      toast.success('Diagnosis and quotation updated successfully');
       fetchTickets();
       setShowActionModal(false);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to update diagnosis');
+      toast.error(err.response?.data?.message || 'Failed to update diagnosis');
+    } finally {
+      setSavingDiagnosis(false);
     }
   };
 
   const handleStatusTransition = async () => {
     if (!activeTicket || !newStatus) return;
+    setSubmittingStatus(true);
     try {
       await api.patch(`/tickets/${activeTicket.id}/status`, {
         status: newStatus,
         remarks: statusRemarks || undefined,
       });
-      alert(`Ticket status updated to ${newStatus}`);
+      toast.success(`Ticket status transitioned to ${newStatus.replace(/_/g, ' ')}`);
       fetchTickets();
+      broadcastLocalUpdate('TICKET', 'STATUS_CHANGED');
       setShowActionModal(false);
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to change status');
+      toast.error(err.response?.data?.message || 'Failed to change status');
+    } finally {
+      setSubmittingStatus(false);
     }
+  };
+
+  const getAllowedNextStatuses = (ticket: RepairTicket): string[] => {
+    // If ticket is already in a terminal state, no further transitions
+    if (['DELIVERED', 'CANCELLED', 'REJECTED'].includes(ticket.status)) {
+      return [];
+    }
+
+    // List of available workflow statuses
+    const allStatuses = [
+      'RECEIVED',
+      'DIAGNOSING',
+      'ESTIMATION_PENDING',
+      'APPROVED',
+      'IN_PROGRESS',
+      'WAITING_FOR_PARTS',
+      'ON_HOLD',
+      'READY_FOR_DELIVERY',
+      'DELIVERED',
+      'CANCELLED',
+      'REJECTED',
+    ];
+
+    // Filter out current status
+    let options = allStatuses.filter((st) => st !== ticket.status);
+
+    // Delivering directly requires the item to be in READY_FOR_DELIVERY first
+    if (ticket.status !== 'READY_FOR_DELIVERY') {
+      options = options.filter((st) => st !== 'DELIVERED');
+    }
+
+    // Technicians can do diagnostics, estimations, approvals, workshop progress, and ready-for-delivery
+    // Delivery handover and ticket cancellations are front-desk actions
+    if (hasRole('TECHNICIAN') && !hasRole('ADMIN') && !hasRole('RECEPTIONIST')) {
+      options = options.filter((st) => st !== 'DELIVERED' && st !== 'CANCELLED');
+    }
+
+    return options;
   };
 
   const handleConsumePart = async () => {
     if (!activeTicket || !selectedPartId) return;
+    setConsumingPart(true);
     try {
       await api.post(`/tickets/${activeTicket.id}/consume-part`, {
         itemId: selectedPartId,
         quantity: Number(partQty),
       });
-      alert('Spare part consumed and deducted from inventory!');
+      toast.success('Spare part deducted from inventory and linked to this job!');
       setSelectedPartId('');
       setPartQty(1);
       fetchTickets();
+      broadcastLocalUpdate('TICKET', 'PART_CONSUMED');
+      broadcastLocalUpdate('INVENTORY', 'UPDATED');
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Failed to consume spare part');
+      toast.error(err.response?.data?.message || 'Failed to consume spare part');
+    } finally {
+      setConsumingPart(false);
+    }
+  };
+
+  const handleRevealPin = async () => {
+    if (!activeTicket) return;
+    setLoadingPin(true);
+    try {
+      const res = await api.get<ApiResponse<{ devicePassword?: string }>>(`/devices/${activeTicket.device.id}/security-pin`);
+      if (res.data.success && res.data.data) {
+        setRevealedPin(res.data.data.devicePassword || 'No PIN set by customer');
+        toast.info('Security PIN revealed for active ticket');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Access Denied: You are not authorized to view this PIN.');
+    } finally {
+      setLoadingPin(false);
     }
   };
 
   const handleDeleteTicket = async (t: RepairTicket) => {
-    if (window.confirm(`Are you sure you want to delete ticket #${t.ticketNumber}? This will remove all associated logs and records.`)) {
+    if (window.confirm(`Are you sure you want to cancel ticket #${t.ticketNumber}? This will safely archive the ticket and preserve all logs, parts, and billing history.`)) {
       try {
         await api.delete(`/tickets/${t.id}`);
-        alert(`Ticket #${t.ticketNumber} deleted successfully`);
+        toast.success(`Ticket #${t.ticketNumber} cancelled and safely archived`);
         fetchTickets();
       } catch (err: any) {
-        alert(err.response?.data?.message || 'Error deleting ticket');
+        toast.error(err.response?.data?.message || 'Error cancelling ticket');
       }
     }
   };
 
   const filteredTickets = tickets.filter((t) => {
-    const matchesSearch =
-      t.ticketNumber.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.customer.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.customer.phone.includes(searchTerm) ||
-      t.device.modelName.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch;
+    const q = searchTerm.toLowerCase();
+    return (
+      t.ticketNumber.toLowerCase().includes(q) ||
+      (t.customer?.fullName || '').toLowerCase().includes(q) ||
+      (t.customer?.phone || '').includes(q) ||
+      (t.device?.modelName || '').toLowerCase().includes(q) ||
+      (t.device?.brand || '').toLowerCase().includes(q)
+    );
   });
 
   const getStatusBadge = (status: TicketStatus) => {
+    let variant: BadgeVariant = 'neutral';
+    let label = status.replace(/_/g, ' ');
+
     switch (status) {
       case 'RECEIVED':
-        return <span className="badge badge-neutral">Received</span>;
+        variant = 'neutral';
+        label = 'Received';
+        break;
       case 'DIAGNOSING':
-        return <span className="badge badge-info">Diagnosing</span>;
+        variant = 'info';
+        label = 'Diagnosing';
+        break;
       case 'ESTIMATION_PENDING':
-        return <span className="badge badge-warning">Pending Approval</span>;
+        variant = 'warning';
+        label = 'Pending Quote';
+        break;
       case 'APPROVED':
-        return <span className="badge badge-info">Approved</span>;
+        variant = 'info';
+        label = 'Approved';
+        break;
+      case 'WAITING_FOR_PARTS':
+        variant = 'purple';
+        label = 'Waiting Parts';
+        break;
+      case 'ON_HOLD':
+        variant = 'warning';
+        label = 'On Hold';
+        break;
       case 'IN_PROGRESS':
-        return <span className="badge badge-info">In Progress</span>;
+        variant = 'info';
+        label = 'In Progress';
+        break;
       case 'READY_FOR_DELIVERY':
-        return <span className="badge badge-success">Ready for Delivery</span>;
+        variant = 'success';
+        label = 'Ready for Delivery';
+        break;
       case 'DELIVERED':
-        return <span className="badge badge-success">Delivered</span>;
+        variant = 'success';
+        label = 'Delivered';
+        break;
       case 'CANCELLED':
       case 'REJECTED':
-        return <span className="badge badge-danger">{status}</span>;
-      default:
-        return <span className="badge badge-neutral">{status}</span>;
+        variant = 'danger';
+        label = status === 'CANCELLED' ? 'Cancelled' : 'Rejected';
+        break;
+    }
+
+    return <Badge variant={variant}>{label}</Badge>;
+  };
+
+  const getPriorityBadge = (p: TicketPriority) => {
+    switch (p) {
+      case 'URGENT':
+        return (
+          <span style={{ color: '#dc2626', fontWeight: 700, fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#dc2626' }} />
+            Urgent
+          </span>
+        );
+      case 'HIGH':
+        return (
+          <span style={{ color: '#d97706', fontWeight: 600, fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706' }} />
+            High
+          </span>
+        );
+      case 'MEDIUM':
+        return (
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 500, fontSize: '0.75rem' }}>
+            Medium
+          </span>
+        );
+      case 'LOW':
+        return (
+          <span style={{ color: 'var(--text-tertiary)', fontWeight: 500, fontSize: '0.75rem' }}>
+            Low
+          </span>
+        );
     }
   };
 
+  const statusFilterTabs = [
+    { key: 'ALL', label: 'All' },
+    { key: 'RECEIVED', label: 'Received' },
+    { key: 'DIAGNOSING', label: 'Diagnosing' },
+    { key: 'ESTIMATION_PENDING', label: 'Quote Pending' },
+    { key: 'APPROVED', label: 'Approved' },
+    { key: 'WAITING_FOR_PARTS', label: 'Parts Wait' },
+    { key: 'ON_HOLD', label: 'On Hold' },
+    { key: 'IN_PROGRESS', label: 'In Progress' },
+    { key: 'READY_FOR_DELIVERY', label: 'Ready' },
+    { key: 'DELIVERED', label: 'Delivered' },
+    { key: 'CANCELLED', label: 'Cancelled' },
+  ];
+
   return (
     <>
-      <Navbar title="Repair Job Tickets" />
+      <Navbar
+        title="Repair Job Tickets"
+        subtitle="Manage customer equipment, diagnoses, and state transitions"
+        onOpenMobile={outletContext?.openMobileSidebar}
+      />
       <div className="page-body">
         {/* Top Control Bar */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flex: 1, maxWidth: 460 }}>
-            <div style={{ position: 'relative', width: '100%' }}>
-              <input
-                type="text"
-                className="form-control"
-                placeholder="Search ticket #, customer name, phone, or model..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-            </div>
-          </div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 14,
+            flexWrap: 'wrap',
+            gap: 10,
+          }}
+        >
+          <SearchInput
+            placeholder="Search ticket #, customer, phone, or model..."
+            value={searchTerm}
+            onChange={setSearchTerm}
+            maxWidth={440}
+          />
 
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              loadTechsAndInventory();
-              setShowIntakeModal(true);
-            }}
-          >
-            <Plus size={18} />
-            <span>New Device Intake</span>
-          </button>
-        </div>
-
-        {/* Status Filter Tabs */}
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', marginBottom: 20, paddingBottom: 4 }}>
-          {['ALL', 'RECEIVED', 'DIAGNOSING', 'ESTIMATION_PENDING', 'APPROVED', 'IN_PROGRESS', 'READY_FOR_DELIVERY', 'DELIVERED'].map((st) => (
+          {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) && (
             <button
-              key={st}
-              onClick={() => setSelectedStatus(st)}
-              className={`btn btn-sm ${selectedStatus === st ? 'btn-primary' : 'btn-outline'}`}
+              className="btn btn-primary"
+              onClick={() => {
+                loadTechsAndInventory();
+                setShowIntakeModal(true);
+              }}
             >
-              {st === 'ALL' ? 'All Tickets' : st.replace(/_/g, ' ')}
+              <Plus size={16} />
+              <span>New Intake</span>
             </button>
-          ))}
+          )}
         </div>
 
-        {/* Tickets Table */}
-        <div className="card" style={{ padding: 0 }}>
+        {/* Status Filter Segmented Controls */}
+        <div style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
+          <div className="segmented-control">
+            {statusFilterTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setSelectedStatus(tab.key)}
+                className={`segmented-btn ${selectedStatus === tab.key ? 'active' : ''}`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Desktop Table View */}
+        <div className="card desktop-table-view" style={{ padding: 0 }}>
           <div className="table-container">
             <table>
               <thead>
@@ -341,69 +578,110 @@ export const Tickets: React.FC = () => {
                   <th>Assigned Tech</th>
                   <th>Status</th>
                   <th>Cost Estimate</th>
-                  <th>Action</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredTickets.length > 0 ? (
                   filteredTickets.map((t) => (
                     <tr key={t.id}>
-                      <td style={{ fontWeight: 700, color: '#2563eb' }}>{t.ticketNumber}</td>
-                      <td>
-                        <div style={{ fontWeight: 600 }}>{t.customer.fullName}</div>
-                        <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{t.customer.phone}</div>
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 500 }}>{t.device.brand} {t.device.modelName}</div>
-                        <div style={{ fontSize: '0.78rem', color: '#64748b' }}>SN: {t.device.serialNumber || 'N/A'}</div>
-                      </td>
-                      <td>
-                        <span style={{
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          color: t.priority === 'URGENT' ? '#ef4444' : t.priority === 'HIGH' ? '#f59e0b' : '#64748b'
-                        }}>
-                          {t.priority}
+                      <td style={{ fontWeight: 700 }}>
+                        <span style={{ color: 'var(--primary)', fontFamily: 'JetBrains Mono, monospace', fontSize: '0.85rem' }}>
+                          {t.ticketNumber}
                         </span>
                       </td>
                       <td>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                          {t.customer.fullName}
+                        </div>
+                        <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)' }}>
+                          {t.customer.phone}
+                        </div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 500, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <Laptop size={14} color="var(--text-tertiary)" />
+                          <span>{t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}</span>
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
+                          SN: {t.device?.serialNumber || 'N/A'}
+                        </div>
+                      </td>
+                      <td>{getPriorityBadge(t.priority)}</td>
+                      <td>
                         {t.assignedTechnician ? (
-                          <span>{t.assignedTechnician.fullName}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div
+                              style={{
+                                width: 22,
+                                height: 22,
+                                borderRadius: '50%',
+                                background: '#e0f2fe',
+                                color: '#0369a1',
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                flexShrink: 0,
+                              }}
+                            >
+                              {t.assignedTechnician.fullName[0]}
+                            </div>
+                            <span>{t.assignedTechnician.fullName}</span>
+                          </div>
                         ) : (
-                          <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Unassigned</span>
+                          <span style={{ color: 'var(--text-tertiary)', fontStyle: 'italic', fontSize: '0.82rem' }}>
+                            Unassigned
+                          </span>
                         )}
                       </td>
                       <td>{getStatusBadge(t.status)}</td>
                       <td>
-                        <div style={{ fontWeight: 600 }}>₹{Number(t.estimatedCost || 0).toFixed(2)}</div>
-                        <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Labor: ₹{Number(t.laborCharge || 0).toFixed(2)}</div>
+                        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }} className="tabular">
+                          ₹{Number(t.estimatedCost || 0).toFixed(2)}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }} className="tabular">
+                          Labor: ₹{Number(t.laborCharge || 0).toFixed(2)}
+                        </div>
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: 6 }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => openTicketDetails(t)}
                           >
-                            Manage
+                            <Sliders size={13} />
+                            <span>Manage</span>
                           </button>
-                          {hasRole('ADMIN') && (
-                            <button
-                              className="btn btn-outline btn-sm"
-                              style={{ color: '#ef4444' }}
-                              title="Delete Ticket"
-                              onClick={() => handleDeleteTicket(t)}
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          )}
+                          {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) &&
+                            t.status !== 'CANCELLED' &&
+                            t.status !== 'DELIVERED' &&
+                            t.status !== 'REJECTED' && (
+                              <button
+                                className="btn btn-ghost btn-sm"
+                                style={{ color: 'var(--status-danger-text)' }}
+                                title="Cancel Ticket"
+                                onClick={() => handleDeleteTicket(t)}
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            )}
                         </div>
                       </td>
                     </tr>
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={8} style={{ textAlign: 'center', padding: 32, color: '#94a3b8' }}>
-                      {loading ? 'Loading tickets...' : 'No tickets matching your filter criteria.'}
+                    <td colSpan={8}>
+                      <EmptyState
+                        icon={Wrench}
+                        title={loading ? 'Loading tickets...' : 'No tickets match your filter criteria'}
+                        description="Try another search term or filter status."
+                        actionText={!loading && !searchTerm && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? 'New Device Intake' : undefined}
+                        onAction={!loading && !searchTerm && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? () => setShowIntakeModal(true) : undefined}
+                        actionIcon={<Plus size={15} />}
+                      />
                     </td>
                   </tr>
                 )}
@@ -411,352 +689,794 @@ export const Tickets: React.FC = () => {
             </table>
           </div>
         </div>
+
+        {/* Mobile Card View */}
+        <div className="mobile-card-list">
+          {filteredTickets.length > 0 ? (
+            filteredTickets.map((t) => (
+              <div key={t.id} className="mobile-data-card">
+                <div className="mobile-card-header">
+                  <div>
+                    <span
+                      style={{
+                        fontFamily: 'JetBrains Mono, monospace',
+                        fontWeight: 700,
+                        color: 'var(--primary)',
+                        fontSize: '0.92rem',
+                      }}
+                    >
+                      {t.ticketNumber}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                        {t.customer.fullName}
+                      </span>
+                      {getPriorityBadge(t.priority)}
+                    </div>
+                  </div>
+                  {getStatusBadge(t.status)}
+                </div>
+
+                <div className="mobile-card-body">
+                  <div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                      Device
+                    </div>
+                    <div style={{ fontWeight: 500, color: 'var(--text-primary)', marginTop: 2 }}>
+                      {t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>
+                      SN: {t.device?.serialNumber || 'N/A'}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                      Estimate
+                    </div>
+                    <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginTop: 2 }} className="tabular">
+                      ₹{Number(t.estimatedCost || 0).toFixed(2)}
+                    </div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }} className="tabular">
+                      Labor: ₹{Number(t.laborCharge || 0).toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mobile-card-footer">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    <UserIcon size={13} color="var(--text-tertiary)" />
+                    <span>{t.assignedTechnician ? t.assignedTechnician.fullName : 'Unassigned'}</span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={() => openTicketDetails(t)}
+                    >
+                      <Sliders size={13} />
+                      <span>Manage</span>
+                    </button>
+                    {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) &&
+                      t.status !== 'CANCELLED' &&
+                      t.status !== 'DELIVERED' &&
+                      t.status !== 'REJECTED' && (
+                        <button
+                          className="btn btn-ghost btn-sm"
+                          style={{ color: 'var(--status-danger-text)' }}
+                          onClick={() => handleDeleteTicket(t)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState
+              icon={Wrench}
+              title={loading ? 'Loading tickets...' : 'No tickets match filter'}
+              description="No repair tickets match the selected status filter or search query."
+              actionText={!loading && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? 'New Device Intake' : undefined}
+              onAction={!loading && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? () => setShowIntakeModal(true) : undefined}
+              actionIcon={<Plus size={15} />}
+            />
+          )}
+        </div>
       </div>
 
       {/* MODAL 1: NEW DEVICE INTAKE JOB SHEET */}
-      {showIntakeModal && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 650 }}>
-            <h3 style={{ margin: '0 0 16px 0' }}>New Device Intake Check-in</h3>
-            <form onSubmit={handleCreateTicket}>
-              <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${!isNewCustomer ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setIsNewCustomer(false)}
+      <Modal
+        isOpen={showIntakeModal}
+        onClose={() => setShowIntakeModal(false)}
+        title="New Device Intake Job Sheet"
+        description="Check in customer equipment, register hardware specifications, and assign technicians"
+        maxWidth={660}
+      >
+        <form onSubmit={handleCreateTicket}>
+          {/* Customer Selection Tabs */}
+          <div style={{ marginBottom: 18 }}>
+            <div className="segmented-control" style={{ width: '100%' }}>
+              <button
+                type="button"
+                className={`segmented-btn ${!isNewCustomer ? 'active' : ''}`}
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => setIsNewCustomer(false)}
+              >
+                Existing Customer
+              </button>
+              <button
+                type="button"
+                className={`segmented-btn ${isNewCustomer ? 'active' : ''}`}
+                style={{ flex: 1, justifyContent: 'center' }}
+                onClick={() => setIsNewCustomer(true)}
+              >
+                + Register New
+              </button>
+            </div>
+          </div>
+
+          {!isNewCustomer ? (
+            <div className="modal-section-card">
+              <div className="form-group">
+                <label className="form-label">
+                  Select Customer <span className="required-mark">*</span>
+                </label>
+                <select
+                  className="form-control"
+                  value={selectedCustomerId}
+                  onChange={(e) => handleCustomerChange(Number(e.target.value))}
+                  required
                 >
-                  Existing Customer
-                </button>
-                <button
-                  type="button"
-                  className={`btn btn-sm ${isNewCustomer ? 'btn-primary' : 'btn-outline'}`}
-                  onClick={() => setIsNewCustomer(true)}
-                >
-                  + New Customer & Device
-                </button>
+                  <option value="">-- Choose registered customer --</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.fullName} ({c.phone})
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              {!isNewCustomer ? (
+              {selectedCustomerId && (
                 <>
-                  <div className="form-group">
-                    <label className="form-label">Select Customer</label>
-                    <select
-                      className="form-control"
-                      value={selectedCustomerId}
-                      onChange={(e) => handleCustomerChange(Number(e.target.value))}
-                      required
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 12 }}>
+                    <label className="form-label" style={{ marginBottom: 0 }}>
+                      Device Equipment <span className="required-mark">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ color: 'var(--primary)', fontWeight: 600, padding: '2px 8px', fontSize: '0.82rem' }}
+                      onClick={() => {
+                        setIsNewDeviceForExistingCustomer(!isNewDeviceForExistingCustomer);
+                        if (!isNewDeviceForExistingCustomer) {
+                          setSelectedDeviceId('');
+                        }
+                      }}
                     >
-                      <option value="">-- Choose registered customer --</option>
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.fullName} ({c.phone})
-                        </option>
-                      ))}
-                    </select>
+                      {isNewDeviceForExistingCustomer ? '← Choose Existing Device' : '+ Register New Device'}
+                    </button>
                   </div>
 
-                  <div className="form-group">
-                    <label className="form-label">Select Customer Device</label>
-                    <select
-                      className="form-control"
-                      value={selectedDeviceId}
-                      onChange={(e) => setSelectedDeviceId(Number(e.target.value))}
-                      required
-                    >
-                      <option value="">-- Choose device --</option>
-                      {devices.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.brand} {d.modelName} (SN: {d.serialNumber || 'N/A'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              ) : (
-                <div style={{ padding: 14, background: '#f8fafc', borderRadius: 8, marginBottom: 16 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div className="form-group">
-                      <label className="form-label">Customer Name</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        required
-                        value={newCustName}
-                        onChange={(e) => setNewCustName(e.target.value)}
-                        placeholder="e.g. Ramesh Gupta"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Phone Number</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        required
-                        value={newCustPhone}
-                        onChange={(e) => setNewCustPhone(e.target.value)}
-                        placeholder="+91 9876543210"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Device Type</label>
+                  {!isNewDeviceForExistingCustomer ? (
+                    <div className="form-group" style={{ marginBottom: 0 }}>
                       <select
                         className="form-control"
-                        value={newDevType}
-                        onChange={(e) => setNewDevType(e.target.value)}
+                        value={selectedDeviceId}
+                        onChange={(e) => setSelectedDeviceId(Number(e.target.value))}
+                        required={!isNewDeviceForExistingCustomer}
                       >
-                        <option value="LAPTOP">Laptop</option>
-                        <option value="DESKTOP">Desktop</option>
-                        <option value="ALL_IN_ONE">All-in-One</option>
-                        <option value="CUSTOM_PC">Custom PC</option>
+                        <option value="">
+                          {devices.length > 0 ? '-- Choose registered device --' : '-- No devices found for this customer --'}
+                        </option>
+                        {devices.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.brand} {d.modelName} ({d.deviceType}) — SN: {d.serialNumber || 'N/A'}
+                          </option>
+                        ))}
                       </select>
+                      {devices.length === 0 && (
+                        <div style={{ fontSize: '0.78rem', color: 'var(--status-warning-text)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--status-warning-bg)', padding: '6px 10px', borderRadius: 6 }}>
+                          <span>No registered devices found for this customer.</span>
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            style={{ padding: '2px 10px', fontSize: '0.76rem' }}
+                            onClick={() => setIsNewDeviceForExistingCustomer(true)}
+                          >
+                            + Register Device Now
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Brand</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        required
-                        value={newDevBrand}
-                        onChange={(e) => setNewDevBrand(e.target.value)}
-                        placeholder="Dell, HP, Apple, Lenovo"
-                      />
+                  ) : (
+                    <div style={{ background: 'var(--bg-surface-subtle)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
+                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
+                        Register New Hardware for this Customer:
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                        <div className="form-group">
+                          <label className="form-label">Device Type <span className="required-mark">*</span></label>
+                          <select
+                            className="form-control"
+                            value={newDevType}
+                            onChange={(e) => setNewDevType(e.target.value)}
+                          >
+                            <option value="LAPTOP">Laptop</option>
+                            <option value="DESKTOP">Desktop</option>
+                            <option value="ALL_IN_ONE">All-in-One PC</option>
+                            <option value="PRINTER">Printer / Peripheral</option>
+                            <option value="CUSTOM_PC">Custom PC / Workstation</option>
+                          </select>
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Brand <span className="required-mark">*</span></label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            required={isNewDeviceForExistingCustomer}
+                            value={newDevBrand}
+                            onChange={(e) => setNewDevBrand(e.target.value)}
+                            placeholder="Apple, Dell, HP, Lenovo"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Model Name <span className="required-mark">*</span></label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            required={isNewDeviceForExistingCustomer}
+                            value={newDevModel}
+                            onChange={(e) => setNewDevModel(e.target.value)}
+                            placeholder="e.g. ThinkPad T14 / MacBook Pro"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Serial Number</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            value={newDevSerial}
+                            onChange={(e) => setNewDevSerial(e.target.value)}
+                            placeholder="S/N or Service Tag"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Device PIN / Unlock Pattern</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            value={newDevPassword}
+                            onChange={(e) => setNewDevPassword(e.target.value)}
+                            placeholder="PIN or Password"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label">Physical Condition</label>
+                          <input
+                            type="text"
+                            className="form-control"
+                            value={newDevCondition}
+                            onChange={(e) => setNewDevCondition(e.target.value)}
+                            placeholder="Scratches, dents, cracks..."
+                          />
+                        </div>
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Accessories Left with Device</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          value={newDevAccessories}
+                          onChange={(e) => setNewDevAccessories(e.target.value)}
+                          placeholder="e.g. Charger, Power Cable, Laptop Bag"
+                        />
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label className="form-label">Model Name</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        required
-                        value={newDevModel}
-                        onChange={(e) => setNewDevModel(e.target.value)}
-                        placeholder="Inspiron 15, MacBook Pro"
-                      />
-                    </div>
-                    <div className="form-group">
-                      <label className="form-label">Serial Number</label>
-                      <input
-                        type="text"
-                        className="form-control"
-                        value={newDevSerial}
-                        onChange={(e) => setNewDevSerial(e.target.value)}
-                        placeholder="Serial Number"
-                      />
-                    </div>
-                  </div>
-                </div>
+                  )}
+                </>
               )}
-
-              <div className="form-group">
-                <label className="form-label">Reported Issue / Customer Complaint</label>
-                <textarea
-                  className="form-control"
-                  rows={3}
-                  required
-                  placeholder="Describe problem (e.g. Broken screen, overheating, BSOD blue screen crash)..."
-                  value={problemReported}
-                  onChange={(e) => setProblemReported(e.target.value)}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            </div>
+          ) : (
+            <div className="modal-section-card">
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
                 <div className="form-group">
-                  <label className="form-label">Assign Technician</label>
+                  <label className="form-label">
+                    Customer Full Name <span className="required-mark">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    value={newCustName}
+                    onChange={(e) => setNewCustName(e.target.value)}
+                    placeholder="e.g. Priya Sundaram"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">
+                    Phone Number <span className="required-mark">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    className="form-control"
+                    required
+                    value={newCustPhone}
+                    onChange={(e) => setNewCustPhone(e.target.value)}
+                    placeholder="+91 9876543210"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Device Type</label>
                   <select
                     className="form-control"
-                    value={selectedTechId}
-                    onChange={(e) => setSelectedTechId(e.target.value ? Number(e.target.value) : '')}
+                    value={newDevType}
+                    onChange={(e) => setNewDevType(e.target.value)}
                   >
-                    <option value="">-- Assign Later --</option>
-                    {technicians.map((tech) => (
-                      <option key={tech.id} value={tech.id}>
-                        {tech.fullName}
-                      </option>
-                    ))}
+                    <option value="LAPTOP">Laptop</option>
+                    <option value="DESKTOP">Desktop</option>
+                    <option value="ALL_IN_ONE">All-in-One PC</option>
+                    <option value="CUSTOM_PC">Custom PC / Workstation</option>
                   </select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Priority</label>
-                  <select
+                  <label className="form-label">
+                    Brand <span className="required-mark">*</span>
+                  </label>
+                  <input
+                    type="text"
                     className="form-control"
-                    value={priority}
-                    onChange={(e) => setPriority(e.target.value)}
-                  >
-                    <option value="LOW">Low</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="HIGH">High</option>
-                    <option value="URGENT">Urgent</option>
-                  </select>
+                    required
+                    value={newDevBrand}
+                    onChange={(e) => setNewDevBrand(e.target.value)}
+                    placeholder="Apple, Dell, HP, Lenovo"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">
+                    Model Name <span className="required-mark">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    required
+                    value={newDevModel}
+                    onChange={(e) => setNewDevModel(e.target.value)}
+                    placeholder="e.g. MacBook Pro M1"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Serial Number</label>
+                  <input
+                    type="text"
+                    className="form-control"
+                    value={newDevSerial}
+                    onChange={(e) => setNewDevSerial(e.target.value)}
+                    placeholder="Hardware SN / Tag"
+                  />
                 </div>
               </div>
+            </div>
+          )}
 
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-                <button
-                  type="button"
-                  className="btn btn-outline"
-                  onClick={() => setShowIntakeModal(false)}
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary">
-                  Generate Job Sheet & Ticket
-                </button>
-              </div>
-            </form>
+          <div className="form-group">
+            <label className="form-label">
+              Reported Issue / Symptoms <span className="required-mark">*</span>
+            </label>
+            <textarea
+              className="form-control"
+              rows={3}
+              required
+              placeholder="Describe symptoms (e.g. Broken screen, won't boot, liquid spill)..."
+              value={problemReported}
+              onChange={(e) => setProblemReported(e.target.value)}
+            />
           </div>
-        </div>
-      )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+            <div className="form-group">
+              <label className="form-label">Assign Technician</label>
+              <select
+                className="form-control"
+                value={selectedTechId}
+                onChange={(e) => setSelectedTechId(e.target.value ? Number(e.target.value) : '')}
+              >
+                <option value="">-- Assign Later --</option>
+                {technicians.map((tech) => (
+                  <option key={tech.id} value={tech.id}>
+                    {tech.fullName}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Priority Level</label>
+              <select
+                className="form-control"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as TicketPriority)}
+              >
+                <option value="LOW">Low</option>
+                <option value="MEDIUM">Medium</option>
+                <option value="HIGH">High</option>
+                <option value="URGENT">Urgent</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setShowIntakeModal(false)}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={submittingIntake}>
+              {submittingIntake ? (
+                <>
+                  <Loader2 size={15} className="spin-fast" />
+                  <span>Generating...</span>
+                </>
+              ) : (
+                <span>Generate Job Sheet</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
       {/* MODAL 2: TICKET MANAGEMENT / DIAGNOSIS & SPARE PARTS CONSUMPTION */}
-      {showActionModal && activeTicket && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: 700 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <div>
-                <h3 style={{ margin: 0 }}>Ticket #{activeTicket.ticketNumber}</h3>
-                <span style={{ fontSize: '0.85rem', color: '#64748b' }}>
-                  {activeTicket.device.brand} {activeTicket.device.modelName} – {activeTicket.customer.fullName} ({activeTicket.customer.phone})
-                </span>
-              </div>
-              <div>{getStatusBadge(activeTicket.status)}</div>
+      {activeTicket && (
+        <Modal
+          isOpen={showActionModal}
+          onClose={() => setShowActionModal(false)}
+          title={`Ticket #${activeTicket.ticketNumber}`}
+          description={`${activeTicket.device ? `${activeTicket.device.brand} ${activeTicket.device.modelName}` : 'Equipment'} — ${activeTicket.customer?.fullName || 'Customer'}`}
+          maxWidth={720}
+        >
+          {/* Header Status & PIN Box */}
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: 'var(--bg-surface-subtle)',
+              border: '1px solid var(--border-default)',
+              padding: '12px 14px',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: 14,
+              flexWrap: 'wrap',
+              gap: 8,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                Status:
+              </span>
+              {getStatusBadge(activeTicket.status)}
             </div>
 
-            {/* Section 1: State Machine Transition */}
-            <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8, marginBottom: 20 }}>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Clock size={16} color="#2563eb" />
-                <span>Transition Status State Machine</span>
+            {/* Audited Security PIN */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                <span style={{ fontWeight: 600 }}>PIN: </span>
+                {revealedPin ? (
+                  <span
+                    style={{
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontWeight: 700,
+                      background: '#e0e7ff',
+                      color: '#3730a3',
+                      padding: '2px 8px',
+                      borderRadius: 4,
+                    }}
+                  >
+                    {revealedPin}
+                  </span>
+                ) : (
+                  <span style={{ color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
+                    Protected
+                  </span>
+                )}
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10 }}>
+              {(hasRole('ADMIN') ||
+                (hasRole('TECHNICIAN') && activeTicket.assignedTechnician?.id === user?.id)) &&
+                !revealedPin && (
+                  <button
+                    className="btn btn-outline btn-sm"
+                    disabled={loadingPin}
+                    onClick={handleRevealPin}
+                    title="Access device unlock PIN"
+                  >
+                    <Eye size={13} />
+                    <span>{loadingPin ? '...' : 'Reveal'}</span>
+                  </button>
+                )}
+            </div>
+          </div>
+
+          {/* Section 1: State Machine Transition */}
+          <div className="modal-section-card">
+            <div className="modal-section-title">
+              <Clock size={15} color="var(--primary)" />
+              <span>State Machine Status Transition</span>
+            </div>
+
+            {['DELIVERED', 'REJECTED', 'CANCELLED'].includes(activeTicket.status) ? (
+              <div style={{ color: 'var(--text-tertiary)', fontSize: '0.84rem', fontStyle: 'italic' }}>
+                This repair ticket is in terminal state ({activeTicket.status}). No further state changes are permitted.
+              </div>
+            ) : getAllowedNextStatuses(activeTicket).length === 0 ? (
+              <div style={{ color: '#b45309', fontSize: '0.84rem' }}>
+                {hasRole('TECHNICIAN') && activeTicket.assignedTechnician?.id !== user?.id
+                  ? `Assigned to another technician (${activeTicket.assignedTechnician?.fullName || 'another staff member'}). Workshop transitions are reserved for the assigned technician or administrator.`
+                  : 'No transitions available for your role at this stage.'}
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, alignItems: 'center' }}>
                 <select
                   className="form-control"
                   value={newStatus}
                   onChange={(e) => setNewStatus(e.target.value)}
                 >
-                  <option value="RECEIVED">RECEIVED</option>
-                  <option value="DIAGNOSING">DIAGNOSING</option>
-                  <option value="ESTIMATION_PENDING">ESTIMATION_PENDING</option>
-                  <option value="APPROVED">APPROVED</option>
-                  <option value="IN_PROGRESS">IN_PROGRESS</option>
-                  <option value="READY_FOR_DELIVERY">READY_FOR_DELIVERY</option>
-                  <option value="DELIVERED">DELIVERED</option>
-                  <option value="CANCELLED">CANCELLED</option>
-                </select>
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="Audit remark notes..."
-                  value={statusRemarks}
-                  onChange={(e) => setStatusRemarks(e.target.value)}
-                />
-                <button className="btn btn-primary btn-sm" onClick={handleStatusTransition}>
-                  Apply State Change
-                </button>
-              </div>
-            </div>
-
-            {/* Section 2: Technician Diagnosis & Cost Estimation */}
-            <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8, marginBottom: 20 }}>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Wrench size={16} color="#2563eb" />
-                <span>Diagnostic Notes & Quotation</span>
-              </div>
-              <div className="form-group">
-                <textarea
-                  className="form-control"
-                  rows={2}
-                  placeholder="Root cause, testing results, required work..."
-                  value={diagNotes}
-                  onChange={(e) => setDiagNotes(e.target.value)}
-                />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 10, alignItems: 'end' }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Estimated Total (₹)</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={estCost}
-                    onChange={(e) => setEstCost(e.target.value)}
-                    placeholder="e.g. 3200"
-                  />
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label className="form-label">Labor Charge (₹)</label>
-                  <input
-                    type="number"
-                    className="form-control"
-                    value={laborCharge}
-                    onChange={(e) => setLaborCharge(e.target.value)}
-                    placeholder="e.g. 500"
-                  />
-                </div>
-                <button className="btn btn-outline" onClick={handleUpdateDiagnosis}>
-                  Save Diagnosis
-                </button>
-              </div>
-            </div>
-
-            {/* Section 3: Spare Parts Consumption */}
-            <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8, marginBottom: 20 }}>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Package size={16} color="#2563eb" />
-                <span>Consume Spare Part from Inventory</span>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: 10 }}>
-                <select
-                  className="form-control"
-                  value={selectedPartId}
-                  onChange={(e) => setSelectedPartId(e.target.value ? Number(e.target.value) : '')}
-                >
-                  <option value="">-- Choose Part from Stock --</option>
-                  {inventory.map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name} (Stock: {i.currentStock} | ₹{i.sellingPrice})
+                  <option value="">-- Choose Next State --</option>
+                  {getAllowedNextStatuses(activeTicket).map((st) => (
+                    <option key={st} value={st}>
+                      {st.replace(/_/g, ' ')}
                     </option>
                   ))}
                 </select>
                 <input
-                  type="number"
-                  min="1"
+                  type="text"
                   className="form-control"
-                  value={partQty}
-                  onChange={(e) => setPartQty(Number(e.target.value))}
-                  placeholder="Qty"
+                  placeholder="Audit remarks..."
+                  value={statusRemarks}
+                  onChange={(e) => setStatusRemarks(e.target.value)}
                 />
-                <button className="btn btn-outline" onClick={handleConsumePart}>
-                  Deduct & Attach
+                <button
+                  className="btn btn-primary btn-sm"
+                  disabled={!newStatus || submittingStatus}
+                  onClick={handleStatusTransition}
+                  style={{ height: 36 }}
+                >
+                  {submittingStatus ? (
+                    <>
+                      <Loader2 size={13} className="spin-fast" />
+                      <span>Applying...</span>
+                    </>
+                  ) : (
+                    'Apply Change'
+                  )}
                 </button>
               </div>
-            </div>
+            )}
 
-            {/* Section 4: Audit Log Trail */}
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-                <History size={16} color="#64748b" />
-                <span>Status Audit Log History</span>
+            {activeTicket.status === 'READY_FOR_DELIVERY' && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '10px 12px',
+                  background: 'rgba(0, 113, 227, 0.05)',
+                  border: '1px solid rgba(0, 113, 227, 0.15)',
+                  borderRadius: 10,
+                  fontSize: '0.80rem',
+                  color: '#1e293b',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 220 }}>
+                  <AlertCircle size={16} color="#0071e3" style={{ flexShrink: 0 }} />
+                  <span>
+                    <strong>Customer Handover Requirement:</strong> Delivering a device (DELIVERED) is executed by counter Receptionists or Admins once any associated repair invoice is settled in full.
+                  </span>
+                </div>
+                {!hasRole('TECHNICIAN') && (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-xs"
+                    onClick={() => {
+                      setShowActionModal(false);
+                      navigate('/billing');
+                    }}
+                    style={{ whiteSpace: 'nowrap', fontSize: '0.75rem', height: 28 }}
+                  >
+                    Open Billing & Payments →
+                  </button>
+                )}
               </div>
-              <div style={{ maxHeight: 150, overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: 6 }}>
-                {ticketLogs.map((log) => (
-                  <div key={log.id} style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9', fontSize: '0.82rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', color: '#64748b' }}>
-                      <span><b>{log.newStatus}</b> {log.previousStatus ? `(from ${log.previousStatus})` : ''}</span>
-                      <span>{new Date(log.createdAt).toLocaleTimeString()}</span>
-                    </div>
-                    {log.remarks && <div style={{ color: '#334155', marginTop: 2 }}>{log.remarks}</div>}
+            )}
+          </div>
+
+          {/* Section 2: Diagnosis & Labor Charge */}
+          <div className="modal-section-card">
+            <div className="modal-section-title">
+              <Wrench size={15} color="var(--primary)" />
+              <span>Diagnostic Notes & Customer Quotation</span>
+            </div>
+            {['DELIVERED', 'REJECTED', 'CANCELLED'].includes(activeTicket.status) ? (
+              <div style={{ color: 'var(--text-tertiary)', fontSize: '0.84rem', fontStyle: 'italic' }}>
+                This repair ticket is finalized ({activeTicket.status}). Diagnosis findings and labor charges are locked.
+              </div>
+            ) : hasRole('TECHNICIAN') && activeTicket.assignedTechnician?.id !== user?.id ? (
+              <div style={{ color: '#b45309', fontSize: '0.84rem' }}>
+                Diagnostic notes and quotation can only be recorded by the assigned technician ({activeTicket.assignedTechnician?.fullName || 'unassigned'}) or administrator.
+              </div>
+            ) : (
+              <>
+                <div className="form-group">
+                  <textarea
+                    className="form-control"
+                    rows={2}
+                    placeholder="Hardware diagnosis, findings, recommended replacements..."
+                    value={diagNotes}
+                    onChange={(e) => setDiagNotes(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, alignItems: 'end' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Estimated Total (₹)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      className="form-control"
+                      value={estCost}
+                      onChange={(e) => setEstCost(e.target.value)}
+                      placeholder="e.g. 3200"
+                    />
                   </div>
-                ))}
-              </div>
-            </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Labor Charge (₹)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      className="form-control"
+                      value={laborCharge}
+                      onChange={(e) => setLaborCharge(e.target.value)}
+                      placeholder="e.g. 500"
+                    />
+                  </div>
+                  <button
+                    className="btn btn-outline"
+                    disabled={savingDiagnosis}
+                    onClick={handleUpdateDiagnosis}
+                    style={{ height: 36 }}
+                  >
+                    {savingDiagnosis ? (
+                      <>
+                        <Loader2 size={13} className="spin-fast" />
+                        <span>Saving...</span>
+                      </>
+                    ) : (
+                      'Save Diagnosis'
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
 
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
-              <button className="btn btn-outline" onClick={() => setShowActionModal(false)}>
-                Close
-              </button>
+          {/* Section 3: Spare Parts Consumption */}
+          <div className="modal-section-card">
+            <div className="modal-section-title">
+              <Package size={15} color="var(--primary)" />
+              <span>Consume Spare Part from Inventory</span>
+            </div>
+            {['DELIVERED', 'REJECTED', 'CANCELLED'].includes(activeTicket.status) ? (
+              <div style={{ color: 'var(--text-tertiary)', fontSize: '0.84rem', fontStyle: 'italic' }}>
+                This repair ticket is finalized ({activeTicket.status}). Additional parts cannot be consumed.
+              </div>
+            ) : hasRole('TECHNICIAN') && activeTicket.assignedTechnician?.id !== user?.id ? (
+              <div style={{ color: '#b45309', fontSize: '0.84rem' }}>
+                Parts consumption is reserved for the assigned technician ({activeTicket.assignedTechnician?.fullName || 'unassigned'}) or administrator.
+              </div>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, alignItems: 'end' }}>
+                <div style={{ gridColumn: 'span 2' }}>
+                  <select
+                    className="form-control"
+                    value={selectedPartId}
+                    onChange={(e) => setSelectedPartId(e.target.value ? Number(e.target.value) : '')}
+                  >
+                    <option value="">-- Choose Part from Stock --</option>
+                    {inventory.map((i) => (
+                      <option key={i.id} value={i.id}>
+                        {i.name} (Stock: {i.currentStock} | ₹{i.sellingPrice})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <input
+                    type="number"
+                    min="1"
+                    className="form-control"
+                    value={partQty}
+                    onChange={(e) => setPartQty(Number(e.target.value))}
+                    placeholder="Qty"
+                  />
+                </div>
+                <button
+                  className="btn btn-outline"
+                  disabled={!selectedPartId || consumingPart}
+                  onClick={handleConsumePart}
+                  style={{ height: 36 }}
+                >
+                  {consumingPart ? (
+                    <>
+                      <Loader2 size={13} className="spin-fast" />
+                      <span>Deducting...</span>
+                    </>
+                  ) : (
+                    'Deduct Stock'
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Section 4: Audit Log Trail */}
+          <div>
+            <div className="modal-section-title">
+              <History size={15} color="var(--text-secondary)" />
+              <span>Status Audit Log History</span>
+            </div>
+            <div
+              style={{
+                maxHeight: 130,
+                overflowY: 'auto',
+                border: '1px solid var(--border-default)',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--bg-surface)',
+              }}
+            >
+              {ticketLogs.length > 0 ? (
+                ticketLogs.map((log) => (
+                  <div
+                    key={log.id}
+                    style={{
+                      padding: '8px 12px',
+                      borderBottom: '1px solid var(--border-subtle)',
+                      fontSize: '0.8rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                      <span>
+                        <b style={{ color: 'var(--text-primary)' }}>{log.newStatus}</b>{' '}
+                        {log.previousStatus ? `(from ${log.previousStatus})` : ''}
+                      </span>
+                      <span className="tabular" style={{ color: 'var(--text-tertiary)', fontSize: '0.74rem' }}>
+                        {new Date(log.createdAt).toLocaleTimeString()}
+                      </span>
+                    </div>
+                    {log.remarks && (
+                      <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
+                        {log.remarks}
+                      </div>
+                    )}
+                  </div>
+                ))
+              ) : (
+                <div style={{ padding: 14, textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '0.8rem' }}>
+                  No historical transition logs recorded yet.
+                </div>
+              )}
             </div>
           </div>
-        </div>
+
+          <div className="modal-footer">
+            <button className="btn btn-outline" onClick={() => setShowActionModal(false)}>
+              Close
+            </button>
+          </div>
+        </Modal>
       )}
     </>
   );
 };
-

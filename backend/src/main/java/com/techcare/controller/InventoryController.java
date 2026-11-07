@@ -5,6 +5,7 @@ import com.techcare.dto.request.StockAdjustmentRequest;
 import com.techcare.dto.response.ApiResponse;
 import com.techcare.entity.InventoryItem;
 import com.techcare.entity.StockMovement;
+import com.techcare.exception.ResourceNotFoundException;
 import com.techcare.entity.User;
 import com.techcare.repository.UserRepository;
 import com.techcare.security.UserDetailsImpl;
@@ -50,7 +51,8 @@ public class InventoryController {
     public ResponseEntity<ApiResponse<InventoryItem>> createItem(
             @Valid @RequestBody InventoryItemRequest request,
             @AuthenticationPrincipal UserDetailsImpl userDetails) {
-        User user = userRepository.getReferenceById(userDetails.getId());
+        User user = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userDetails.getId()));
         InventoryItem created = inventoryService.createItem(request, user);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Inventory item created successfully", created));
@@ -71,7 +73,8 @@ public class InventoryController {
             @PathVariable Long id,
             @Valid @RequestBody StockAdjustmentRequest request,
             @AuthenticationPrincipal UserDetailsImpl userDetails) {
-        User user = userRepository.getReferenceById(userDetails.getId());
+        User user = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userDetails.getId()));
         InventoryItem updated = inventoryService.adjustStock(id, request, user);
         return ResponseEntity.ok(ApiResponse.success("Stock adjusted successfully", updated));
     }
@@ -83,7 +86,7 @@ public class InventoryController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Void>> deleteItem(@PathVariable Long id) {
         inventoryService.deleteItem(id);
         return ResponseEntity.ok(ApiResponse.success("Inventory item deleted or deactivated successfully", null));

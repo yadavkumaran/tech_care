@@ -9,5 +9,6 @@ import java.util.List;
 @Repository
 public interface TicketPartUsedRepository extends JpaRepository<TicketPartUsed, Long> {
     List<TicketPartUsed> findByTicketId(Long ticketId);
+    boolean existsByItemId(Long itemId);
 }
 

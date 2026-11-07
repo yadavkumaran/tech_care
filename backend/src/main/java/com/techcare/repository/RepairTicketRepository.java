@@ -13,12 +13,18 @@ import java.util.Optional;
 @Repository
 public interface RepairTicketRepository extends JpaRepository<RepairTicket, Long> {
     Optional<RepairTicket> findByTicketNumber(String ticketNumber);
+    boolean existsByTicketNumber(String ticketNumber);
     List<RepairTicket> findByStatus(TicketStatus status);
     List<RepairTicket> findByAssignedTechnicianId(Long technicianId);
     List<RepairTicket> findByCustomerId(Long customerId);
+    boolean existsByCustomerId(Long customerId);
+    List<RepairTicket> findByDeviceId(Long deviceId);
+    boolean existsByDeviceId(Long deviceId);
+    boolean existsByCreatedById(Long createdById);
+    boolean existsByAssignedTechnicianId(Long technicianId);
 
-    // Count tickets in non-delivered/non-cancelled active states
-    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.status NOT IN ('DELIVERED', 'CANCELLED')")
+    // Count tickets in active workshop states (excluding terminal states: DELIVERED, CANCELLED, REJECTED)
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')")
     long countActiveTickets();
 
     long countByStatus(TicketStatus status);

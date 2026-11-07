@@ -1,0 +1,42 @@
+services:
+  # ---------------------------------------------------------------------------
+  # 1. TechCare Backend API (Spring Boot / Docker)
+  # ---------------------------------------------------------------------------
+  - type: web
+    name: techcare-backend
+    env: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    region: oregon
+    healthCheckPath: /api/public/health
+    envVars:
+      - key: SPRING_DATASOURCE_URL
+        sync: false
+      - key: SPRING_DATASOURCE_USERNAME
+        sync: false
+      - key: SPRING_DATASOURCE_PASSWORD
+        sync: false
+      - key: TECHCARE_JWT_SECRET
+        sync: false
+      - key: TECHCARE_JWT_EXPIRATION_MS
+        value: 86400000
+      - key: TECHCARE_DEVICE_PIN_KEY
+        sync: false
+
+  # ---------------------------------------------------------------------------
+  # 2. TechCare Frontend Web App (React / Vite Static Site)
+  # ---------------------------------------------------------------------------
+  - type: static
+    name: techcare-frontend
+    rootDir: frontend
+    buildCommand: npm install && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        sync: false # Set to https://<your-backend-name>.onrender.com
+

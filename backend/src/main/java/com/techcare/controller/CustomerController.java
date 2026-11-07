@@ -48,6 +48,7 @@ public class CustomerController {
     }
 
     @DeleteMapping("/{id}")
+    @org.springframework.security.access.prepost.PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Void>> deleteCustomer(@PathVariable Long id) {
         customerService.deleteCustomer(id);
         return ResponseEntity.ok(ApiResponse.success("Customer deleted successfully", null));

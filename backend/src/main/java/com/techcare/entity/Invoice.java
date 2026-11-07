@@ -1,5 +1,6 @@
 package com.techcare.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.techcare.entity.enums.InvoiceStatus;
 import com.techcare.entity.enums.InvoiceType;
 import jakarta.persistence.*;
@@ -20,6 +21,7 @@ import java.util.List;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
+@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Invoice {
 
     @Id

@@ -10,107 +10,176 @@ import {
   LogOut,
   Cpu,
   UserCheck,
+  X,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export const Sidebar: React.FC = () => {
+interface SidebarProps {
+  mobileOpen?: boolean;
+  onCloseMobile?: () => void;
+}
+
+export const Sidebar: React.FC<SidebarProps> = ({ mobileOpen, onCloseMobile }) => {
   const { user, logout, hasRole } = useAuth();
 
+  const roleName = user?.roles[0]?.replace('ROLE_', '') || 'STAFF';
+
+  // Get user initials for avatar
+  const initials = user?.fullName
+    ? user.fullName
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2)
+    : 'TC';
+
   return (
-    <aside className="sidebar">
-      <div className="sidebar-brand">
-        <Cpu className="text-blue-500" size={26} color="#38bdf8" />
-        <span>TechCare</span>
-      </div>
-
-      <nav className="sidebar-nav">
-        <NavLink
-          to="/dashboard"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-        >
-          <LayoutDashboard size={18} />
-          <span>Dashboard</span>
-        </NavLink>
-
-        <NavLink
-          to="/tickets"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-        >
-          <Wrench size={18} />
-          <span>Repair Tickets</span>
-        </NavLink>
-
-        <NavLink
-          to="/customers"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-        >
-          <Users size={18} />
-          <span>Customers</span>
-        </NavLink>
-
-        <NavLink
-          to="/inventory"
-          className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-        >
-          <Package size={18} />
-          <span>Spare Parts & Stock</span>
-        </NavLink>
-
-        {hasRole('ADMIN') && (
-          <NavLink
-            to="/purchases"
-            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-          >
-            <Truck size={18} />
-            <span>Vendors & Purchases</span>
-          </NavLink>
-        )}
-
-        {hasRole('ADMIN') && (
-          <NavLink
-            to="/staff"
-            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-          >
-            <UserCheck size={18} />
-            <span>Staff & Technicians</span>
-          </NavLink>
-        )}
-
-        {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) && (
-          <NavLink
-            to="/billing"
-            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-          >
-            <ReceiptText size={18} />
-            <span>Invoices & Billing</span>
-          </NavLink>
-        )}
-      </nav>
-
-      <div className="sidebar-footer">
-        <div>
-          <div style={{ fontSize: '0.85rem', color: '#f1f5f9', fontWeight: 600 }}>
-            {user?.fullName}
+    <>
+      <div
+        className={`sidebar-overlay ${mobileOpen ? 'active' : ''}`}
+        onClick={onCloseMobile}
+      />
+      <aside className={`sidebar ${mobileOpen ? 'mobile-open' : ''}`}>
+        <div className="sidebar-brand">
+          <div className="brand-wrapper">
+            <div className="brand-icon-box">
+              <Cpu size={18} strokeWidth={2.4} />
+            </div>
+            <div className="brand-title">
+              <span>TechCare</span>
+              <span className="brand-badge">SaaS</span>
+            </div>
           </div>
-          <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-            {user?.roles[0]?.replace('ROLE_', '')}
+          {onCloseMobile && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon"
+              onClick={onCloseMobile}
+              style={{ display: mobileOpen ? 'flex' : 'none' }}
+              aria-label="Close navigation"
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
+
+        <div className="sidebar-nav-container">
+          {/* Group 1: General */}
+          <div>
+            <div className="nav-group-label">Overview</div>
+            <div className="nav-group-items">
+              <NavLink
+                to="/dashboard"
+                onClick={onCloseMobile}
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              >
+                <LayoutDashboard size={17} strokeWidth={2} />
+                <span>Dashboard</span>
+              </NavLink>
+            </div>
+          </div>
+
+          {/* Group 2: Service Desk */}
+          <div>
+            <div className="nav-group-label">Service Operations</div>
+            <div className="nav-group-items">
+              <NavLink
+                to="/tickets"
+                onClick={onCloseMobile}
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              >
+                <Wrench size={17} strokeWidth={2} />
+                <span>Repair Tickets</span>
+              </NavLink>
+
+              <NavLink
+                to="/customers"
+                onClick={onCloseMobile}
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              >
+                <Users size={17} strokeWidth={2} />
+                <span>Customers & CRM</span>
+              </NavLink>
+            </div>
+          </div>
+
+          {/* Group 3: Inventory */}
+          <div>
+            <div className="nav-group-label">Inventory & Supply</div>
+            <div className="nav-group-items">
+              <NavLink
+                to="/inventory"
+                onClick={onCloseMobile}
+                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+              >
+                <Package size={17} strokeWidth={2} />
+                <span>Spare Parts & Stock</span>
+              </NavLink>
+
+              {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) && (
+                <NavLink
+                  to="/purchases"
+                  onClick={onCloseMobile}
+                  className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                >
+                  <Truck size={17} strokeWidth={2} />
+                  <span>Vendors & Purchases</span>
+                </NavLink>
+              )}
+            </div>
+          </div>
+
+          {/* Group 4: Finance & Administration */}
+          {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) && (
+            <div>
+              <div className="nav-group-label">Finance & Team</div>
+              <div className="nav-group-items">
+                <NavLink
+                  to="/billing"
+                  onClick={onCloseMobile}
+                  className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                >
+                  <ReceiptText size={17} strokeWidth={2} />
+                  <span>Invoices & Billing</span>
+                </NavLink>
+
+                {hasRole('ADMIN') && (
+                  <NavLink
+                    to="/staff"
+                    onClick={onCloseMobile}
+                    className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                  >
+                    <UserCheck size={17} strokeWidth={2} />
+                    <span>Staff & Technicians</span>
+                  </NavLink>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="sidebar-footer">
+          <div className="user-profile-card">
+            <div className="user-profile-info">
+              <div className="user-avatar">{initials}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="user-name">{user?.fullName || 'User'}</div>
+                <div className="user-role-badge">{roleName}</div>
+              </div>
+            </div>
+            <button
+              onClick={logout}
+              title="Sign out of TechCare"
+              className="btn btn-ghost btn-icon"
+              style={{ color: 'var(--text-tertiary)' }}
+              aria-label="Sign out"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
-        <button
-          onClick={logout}
-          title="Sign out"
-          style={{
-            background: 'none',
-            border: 'none',
-            color: '#94a3b8',
-            cursor: 'pointer',
-            padding: 6,
-          }}
-        >
-          <LogOut size={18} />
-        </button>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 };
-

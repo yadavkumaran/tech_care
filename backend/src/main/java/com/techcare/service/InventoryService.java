@@ -9,7 +9,9 @@ import com.techcare.entity.enums.MovementType;
 import com.techcare.exception.BadRequestException;
 import com.techcare.exception.ResourceNotFoundException;
 import com.techcare.repository.InventoryItemRepository;
+import com.techcare.repository.PurchaseItemRepository;
 import com.techcare.repository.StockMovementRepository;
+import com.techcare.repository.TicketPartUsedRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,6 +24,8 @@ public class InventoryService {
 
     private final InventoryItemRepository inventoryRepository;
     private final StockMovementRepository stockMovementRepository;
+    private final TicketPartUsedRepository ticketPartUsedRepository;
+    private final PurchaseItemRepository purchaseItemRepository;
 
     @Transactional(readOnly = true)
     public List<InventoryItem> getAllItems() {
@@ -133,12 +137,16 @@ public class InventoryService {
     @Transactional
     public void deleteItem(Long id) {
         InventoryItem item = getItemById(id);
-        try {
-            inventoryRepository.delete(item);
-        } catch (Exception e) {
-            // Soft-deactivate if referenced in past tickets, purchases, or ledger
+        boolean hasMovements = stockMovementRepository.existsByItemId(id);
+        boolean hasTicketParts = ticketPartUsedRepository.existsByItemId(id);
+        boolean hasPurchases = purchaseItemRepository.existsByItemId(id);
+
+        if (hasMovements || hasTicketParts || hasPurchases) {
+            // Soft-deactivate to prevent foreign key violation and preserve historical invoices/repairs
             item.setIsActive(false);
             inventoryRepository.save(item);
+        } else {
+            inventoryRepository.delete(item);
         }
     }
 }

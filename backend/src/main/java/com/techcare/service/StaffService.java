@@ -109,12 +109,11 @@ public class StaffService {
     public void deleteStaff(Long id) {
         User user = getStaffById(id);
 
-        // Check if technician is assigned to active repair tickets
-        boolean hasAssignedTickets = ticketRepository.findByAssignedTechnicianId(id).stream()
-                .anyMatch(t -> !"DELIVERED".equals(t.getStatus().name()) && !"CANCELLED".equals(t.getStatus().name()));
+        boolean hasAssignedTickets = !ticketRepository.findByAssignedTechnicianId(id).isEmpty();
+        boolean hasCreatedTickets = ticketRepository.existsByCreatedById(id);
 
-        if (hasAssignedTickets) {
-            // Soft-deactivate instead of hard delete to preserve historical integrity
+        if (hasAssignedTickets || hasCreatedTickets) {
+            // Soft-deactivate instead of hard delete to preserve historical integrity and avoid FK constraint errors
             user.setIsActive(false);
             userRepository.save(user);
         } else {

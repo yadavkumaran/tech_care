@@ -1,6 +1,7 @@
 package com.techcare.repository;
 
 import com.techcare.entity.Payment;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -15,6 +16,10 @@ import java.util.Optional;
 public interface PaymentRepository extends JpaRepository<Payment, Long> {
     Optional<Payment> findByPaymentReference(String paymentReference);
     List<Payment> findByInvoiceId(Long invoiceId);
+
+    // Latest payment references for current year to safely compute sequence
+    @Query("SELECT p.paymentReference FROM Payment p WHERE p.paymentReference LIKE CONCAT('PAY-', :year, '-%') ORDER BY p.id DESC")
+    List<String> findPaymentReferencesByYear(@Param("year") int year, Pageable pageable);
 
     // Calculate sum of payments collected within a date/time window
     @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p WHERE p.paymentDate BETWEEN :start AND :end")

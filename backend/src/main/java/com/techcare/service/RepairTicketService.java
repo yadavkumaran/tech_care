@@ -2,24 +2,33 @@ package com.techcare.service;
 
 import com.techcare.dto.request.*;
 import com.techcare.entity.*;
+import com.techcare.entity.enums.InvoiceStatus;
 import com.techcare.entity.enums.MovementType;
+import com.techcare.entity.enums.Role;
 import com.techcare.entity.enums.TicketPriority;
 import com.techcare.entity.enums.TicketStatus;
 import com.techcare.exception.BadRequestException;
 import com.techcare.exception.ResourceNotFoundException;
 import com.techcare.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.Year;
-import java.util.List;
+import java.util.*;
 
 @Service
 @RequiredArgsConstructor
 public class RepairTicketService {
+
+    private static final Set<TicketStatus> TERMINAL_STATUSES = Set.of(
+            TicketStatus.REJECTED,
+            TicketStatus.DELIVERED,
+            TicketStatus.CANCELLED
+    );
 
     private final RepairTicketRepository ticketRepository;
     private final RepairTicketLogRepository ticketLogRepository;
@@ -30,6 +39,8 @@ public class RepairTicketService {
     private final InventoryItemRepository inventoryRepository;
     private final StockMovementRepository stockMovementRepository;
     private final UserRepository userRepository;
+    private final InvoiceRepository invoiceRepository;
+    private final SyncNotificationService syncService;
 
     @Transactional(readOnly = true)
     public List<RepairTicket> getAllTickets(String search) {
@@ -79,6 +90,9 @@ public class RepairTicketService {
         // Generate unique ticket number: TC-2026-0001
         long count = ticketRepository.count() + 1;
         String ticketNumber = String.format("TC-%d-%04d", Year.now().getValue(), count);
+        if (ticketRepository.existsByTicketNumber(ticketNumber)) {
+            ticketNumber = String.format("TC-%d-%04d-%s", Year.now().getValue(), count, UUID.randomUUID().toString().substring(0, 4).toUpperCase());
+        }
 
         TicketPriority priority = TicketPriority.MEDIUM;
         if (request.getPriority() != null) {
@@ -113,12 +127,20 @@ public class RepairTicketService {
                 .build();
         ticketLogRepository.save(log);
 
+        syncService.publishEvent("TICKET", "CREATED", savedTicket.getId(), savedTicket.getTicketNumber(), currentUser.getUsername());
+
         return savedTicket;
     }
 
     @Transactional
     public RepairTicket updateDiagnosis(Long id, TicketDiagnosisRequest request, User currentUser) {
         RepairTicket ticket = getTicketById(id);
+
+        if (currentUser.getRole() == Role.TECHNICIAN) {
+            if (ticket.getAssignedTechnician() == null || !ticket.getAssignedTechnician().getId().equals(currentUser.getId())) {
+                throw new AccessDeniedException("Access denied: You can only update diagnosis for tickets assigned to you.");
+            }
+        }
 
         if (request.getDiagnosticNotes() != null) {
             ticket.setDiagnosticNotes(request.getDiagnosticNotes());
@@ -154,7 +176,68 @@ public class RepairTicketService {
                 .build();
         ticketLogRepository.save(log);
 
+        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), currentUser.getUsername());
+
         return updated;
+    }
+
+    public void validateTransition(TicketStatus currentStatus, TicketStatus newStatus) {
+        if (currentStatus == newStatus) {
+            return; // Idempotent same-status
+        }
+        if (TERMINAL_STATUSES.contains(currentStatus)) {
+            throw new BadRequestException("Cannot change status: Ticket is in terminal state '" + currentStatus + "'. No further transitions are allowed.");
+        }
+        // Delivering to customer requires device to be marked READY_FOR_DELIVERY first
+        if (newStatus == TicketStatus.DELIVERED && currentStatus != TicketStatus.READY_FOR_DELIVERY) {
+            throw new BadRequestException("Cannot mark as DELIVERED directly from '" + currentStatus + 
+                    "'. Ticket must be in 'READY_FOR_DELIVERY' before handing over to the customer.");
+        }
+    }
+
+    private void validateTransitionRolePermissions(RepairTicket ticket, TicketStatus currentStatus, TicketStatus newStatus, User currentUser) {
+        if (currentUser.getRole() == Role.ADMIN || currentUser.getRole() == Role.RECEPTIONIST) {
+            return; // Admin and Receptionist have full lifecycle management permissions
+        }
+
+        if (currentUser.getRole() == Role.TECHNICIAN) {
+            // Technicians can only operate on tickets assigned to them
+            if (ticket.getAssignedTechnician() == null || !ticket.getAssignedTechnician().getId().equals(currentUser.getId())) {
+                String assignedName = ticket.getAssignedTechnician() != null ? ticket.getAssignedTechnician().getFullName() : "unassigned";
+                throw new AccessDeniedException("Access denied: Technicians can only transition tickets assigned to them (this ticket is assigned to: " + assignedName + ").");
+            }
+
+            // Technicians can perform diagnosing, quote approval/rejection, bench progress, and ready-for-delivery.
+            // Customer handover delivery and cancellation are front-desk receptionist / admin actions.
+            if (newStatus == TicketStatus.DELIVERED) {
+                throw new AccessDeniedException("Access denied: Technicians cannot deliver devices. Handover must be executed by receptionist or administrator.");
+            }
+            if (newStatus == TicketStatus.CANCELLED) {
+                throw new AccessDeniedException("Access denied: Technicians cannot cancel tickets. Cancellation must be authorized by receptionist or administrator.");
+            }
+            return;
+        }
+
+        throw new AccessDeniedException("Access denied: Unauthorized role for repair ticket transitions.");
+    }
+
+    private void validateDeliveryInvoiceRequirements(RepairTicket ticket) {
+        Optional<Invoice> invoiceOpt = invoiceRepository.findByRepairTicketId(ticket.getId());
+        if (invoiceOpt.isPresent()) {
+            Invoice invoice = invoiceOpt.get();
+            if (invoice.getStatus() != InvoiceStatus.PAID || invoice.getBalanceAmount().compareTo(BigDecimal.ZERO) > 0) {
+                throw new BadRequestException("Cannot deliver device: Invoice #" + invoice.getInvoiceNumber() + 
+                        " has an outstanding balance of ₹" + invoice.getBalanceAmount() + ". Payment must be completed before delivery.");
+            }
+        } else {
+            List<TicketPartUsed> parts = ticketPartUsedRepository.findByTicketId(ticket.getId());
+            boolean hasCharges = (ticket.getLaborCharge() != null && ticket.getLaborCharge().compareTo(BigDecimal.ZERO) > 0)
+                    || (ticket.getEstimatedCost() != null && ticket.getEstimatedCost().compareTo(BigDecimal.ZERO) > 0)
+                    || !parts.isEmpty();
+            if (hasCharges) {
+                throw new BadRequestException("Cannot deliver device: An invoice must be generated and settled prior to customer delivery.");
+            }
+        }
     }
 
     @Transactional
@@ -167,12 +250,25 @@ public class RepairTicketService {
             throw new BadRequestException("Invalid status: " + request.getStatus());
         }
 
-        String prevStatus = ticket.getStatus().name();
+        TicketStatus currentStatus = ticket.getStatus();
+
+        // 1. Validate State Transition
+        validateTransition(currentStatus, newStatus);
+
+        // 2. Validate Role Permissions
+        validateTransitionRolePermissions(ticket, currentStatus, newStatus, currentUser);
+
+        // 3. Validate Delivery Requirements (Invoice & Payment)
+        if (newStatus == TicketStatus.DELIVERED) {
+            validateDeliveryInvoiceRequirements(ticket);
+        }
+
+        String prevStatus = currentStatus.name();
         ticket.setStatus(newStatus);
 
-        if (newStatus == TicketStatus.READY_FOR_DELIVERY) {
+        if (newStatus == TicketStatus.READY_FOR_DELIVERY && ticket.getCompletedAt() == null) {
             ticket.setCompletedAt(LocalDateTime.now());
-        } else if (newStatus == TicketStatus.DELIVERED) {
+        } else if (newStatus == TicketStatus.DELIVERED && ticket.getDeliveredAt() == null) {
             ticket.setDeliveredAt(LocalDateTime.now());
         }
 
@@ -183,10 +279,14 @@ public class RepairTicketService {
                 .ticket(updated)
                 .previousStatus(prevStatus)
                 .newStatus(newStatus.name())
-                .remarks(request.getRemarks() != null ? request.getRemarks() : "Status updated to " + newStatus)
+                .remarks(request.getRemarks() != null && !request.getRemarks().trim().isEmpty() 
+                        ? request.getRemarks().trim() 
+                        : "Status transitioned from " + prevStatus + " to " + newStatus.name())
                 .changedBy(currentUser)
                 .build();
         ticketLogRepository.save(log);
+
+        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), currentUser.getUsername());
 
         return updated;
     }
@@ -194,6 +294,13 @@ public class RepairTicketService {
     @Transactional
     public TicketPartUsed consumePart(Long ticketId, ConsumePartRequest request, User currentUser) {
         RepairTicket ticket = getTicketById(ticketId);
+
+        if (currentUser.getRole() == Role.TECHNICIAN) {
+            if (ticket.getAssignedTechnician() == null || !ticket.getAssignedTechnician().getId().equals(currentUser.getId())) {
+                throw new AccessDeniedException("Access denied: You can only consume parts for tickets assigned to you.");
+            }
+        }
+
         InventoryItem item = inventoryRepository.findById(request.getItemId())
                 .orElseThrow(() -> new ResourceNotFoundException("Inventory item not found with id: " + request.getItemId()));
 
@@ -229,6 +336,9 @@ public class RepairTicketService {
                 .build();
         stockMovementRepository.save(movement);
 
+        syncService.publishEvent("TICKET", "PART_CONSUMED", ticket.getId(), ticket.getTicketNumber(), currentUser.getUsername());
+        syncService.publishEvent("INVENTORY", "PART_CONSUMED", savedPart.getId(), item.getSku(), currentUser.getUsername());
+
         return savedPart;
     }
 
@@ -262,9 +372,35 @@ public class RepairTicketService {
     }
 
     @Transactional
-    public void deleteTicket(Long ticketId) {
+    public void deleteTicket(Long ticketId, User currentUser) {
         RepairTicket ticket = getTicketById(ticketId);
-        ticketRepository.delete(ticket);
+
+        if (currentUser.getRole() != Role.ADMIN && currentUser.getRole() != Role.RECEPTIONIST) {
+            throw new AccessDeniedException("Access denied: Only administrators and receptionists can cancel or delete tickets.");
+        }
+
+        if (ticket.getStatus() == TicketStatus.CANCELLED) {
+            throw new BadRequestException("Ticket #" + ticket.getTicketNumber() + " is already cancelled.");
+        }
+        if (ticket.getStatus() == TicketStatus.DELIVERED) {
+            throw new BadRequestException("Cannot cancel ticket #" + ticket.getTicketNumber() + " because it is already delivered.");
+        }
+        if (ticket.getStatus() == TicketStatus.REJECTED) {
+            throw new BadRequestException("Cannot cancel ticket #" + ticket.getTicketNumber() + " because it has been rejected.");
+        }
+
+        TicketStatusUpdateRequest cancelRequest = new TicketStatusUpdateRequest();
+        cancelRequest.setStatus("CANCELLED");
+        cancelRequest.setRemarks("Ticket cancelled and preserved by " + currentUser.getFullName() + " (" + currentUser.getRole() + ")");
+
+        updateTicketStatus(ticketId, cancelRequest, currentUser);
+    }
+
+    @Transactional
+    public void deleteTicket(Long ticketId) {
+        // Safe non-destructive soft cancellation fallback
+        RepairTicket ticket = getTicketById(ticketId);
+        ticket.setStatus(TicketStatus.CANCELLED);
+        ticketRepository.save(ticket);
     }
 }
-

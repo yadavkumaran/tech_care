@@ -1,6 +1,8 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
+import { SyncProvider } from './context/SyncContext';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
@@ -21,7 +23,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }
 };
 
 // Role-Guarded Route Component
-const RoleRoute: React.FC<{ children: React.ReactElement; requiredRole: string }> = ({
+const RoleRoute: React.FC<{ children: React.ReactElement; requiredRole: string | string[] }> = ({
   children,
   requiredRole,
 }) => {
@@ -29,7 +31,10 @@ const RoleRoute: React.FC<{ children: React.ReactElement; requiredRole: string }
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
   }
-  if (!hasRole(requiredRole)) {
+  const allowed = Array.isArray(requiredRole)
+    ? requiredRole.some((r) => hasRole(r))
+    : hasRole(requiredRole);
+  if (!allowed) {
     return <Navigate to="/dashboard" replace />;
   }
   return children;
@@ -38,9 +43,11 @@ const RoleRoute: React.FC<{ children: React.ReactElement; requiredRole: string }
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<Login />} />
+      <ToastProvider>
+        <SyncProvider>
+          <BrowserRouter>
+            <Routes>
+            <Route path="/login" element={<Login />} />
 
           <Route
             path="/"
@@ -58,7 +65,7 @@ export const App: React.FC = () => {
             <Route
               path="purchases"
               element={
-                <RoleRoute requiredRole="ADMIN">
+                <RoleRoute requiredRole={['ADMIN', 'RECEPTIONIST']}>
                   <Purchases />
                 </RoleRoute>
               }
@@ -71,13 +78,22 @@ export const App: React.FC = () => {
                 </RoleRoute>
               }
             />
-            <Route path="billing" element={<Billing />} />
+            <Route
+              path="billing"
+              element={
+                <RoleRoute requiredRole={['ADMIN', 'RECEPTIONIST']}>
+                  <Billing />
+                </RoleRoute>
+              }
+            />
           </Route>
 
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>
       </BrowserRouter>
-    </AuthProvider>
+      </SyncProvider>
+    </ToastProvider>
+  </AuthProvider>
   );
 };
 

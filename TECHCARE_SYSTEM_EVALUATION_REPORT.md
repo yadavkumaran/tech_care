@@ -161,3 +161,4 @@ Show that Suresh is marked inactive and will not appear in new assignment dropdo
 - Clear business sense distinguishing core features from out-of-scope enterprise complexities.
 
 The codebase is compiled, version-controlled with Git, and verified for live demonstration.
+

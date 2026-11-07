@@ -1,5 +1,6 @@
 package com.techcare.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import lombok.*;
@@ -22,7 +23,7 @@ public class CustomerDevice {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @ManyToOne(fetch = FetchType.EAGER, optional = false)
     @JoinColumn(name = "customer_id", nullable = false)
     private Customer customer;
 
@@ -38,6 +39,7 @@ public class CustomerDevice {
     @Column(name = "serial_number", length = 100)
     private String serialNumber;
 
+    @JsonIgnore
     @Column(name = "device_password", length = 100)
     private String devicePassword;
 

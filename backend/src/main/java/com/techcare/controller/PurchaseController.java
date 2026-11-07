@@ -3,6 +3,7 @@ package com.techcare.controller;
 import com.techcare.dto.request.PurchaseRequest;
 import com.techcare.dto.response.ApiResponse;
 import com.techcare.entity.Purchase;
+import com.techcare.exception.ResourceNotFoundException;
 import com.techcare.entity.User;
 import com.techcare.repository.UserRepository;
 import com.techcare.security.UserDetailsImpl;
@@ -31,11 +32,12 @@ public class PurchaseController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Purchase>> recordPurchase(
             @Valid @RequestBody PurchaseRequest request,
             @AuthenticationPrincipal UserDetailsImpl userDetails) {
-        User user = userRepository.getReferenceById(userDetails.getId());
+        User user = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userDetails.getId()));
         Purchase purchase = purchaseService.recordPurchase(request, user);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Purchase recorded and stock added to inventory", purchase));

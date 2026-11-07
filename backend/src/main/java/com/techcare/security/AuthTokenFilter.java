@@ -55,6 +55,12 @@ public class AuthTokenFilter extends OncePerRequestFilter {
             return headerAuth.substring(7);
         }
 
+        // Support token in query parameter for EventSource / SSE real-time stream
+        String paramToken = request.getParameter("token");
+        if (StringUtils.hasText(paramToken)) {
+            return paramToken;
+        }
+
         return null;
     }
 }

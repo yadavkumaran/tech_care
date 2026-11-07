@@ -8,6 +8,8 @@ export type TicketStatus =
   | 'ESTIMATION_PENDING'
   | 'APPROVED'
   | 'REJECTED'
+  | 'WAITING_FOR_PARTS'
+  | 'ON_HOLD'
   | 'IN_PROGRESS'
   | 'READY_FOR_DELIVERY'
   | 'DELIVERED'

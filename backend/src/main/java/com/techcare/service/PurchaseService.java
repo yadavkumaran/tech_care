@@ -8,6 +8,7 @@ import com.techcare.repository.InventoryItemRepository;
 import com.techcare.repository.PurchaseRepository;
 import com.techcare.repository.StockMovementRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,10 +25,29 @@ public class PurchaseService {
     private final VendorService vendorService;
     private final InventoryItemRepository inventoryRepository;
     private final StockMovementRepository stockMovementRepository;
+    private final SyncNotificationService syncService;
 
     @Transactional(readOnly = true)
     public List<Purchase> getAllPurchases() {
         return purchaseRepository.findAll();
+    }
+
+    private synchronized String generateNextPurchaseOrderNumber() {
+        int currentYear = Year.now().getValue();
+        List<String> latestList = purchaseRepository.findPurchaseOrderNumbersByYear(currentYear, PageRequest.of(0, 1));
+        int nextSequence = 1;
+        if (!latestList.isEmpty()) {
+            String latest = latestList.get(0);
+            try {
+                String[] parts = latest.split("-");
+                if (parts.length >= 3) {
+                    nextSequence = Integer.parseInt(parts[2]) + 1;
+                }
+            } catch (Exception e) {
+                nextSequence = (int) purchaseRepository.count() + 1;
+            }
+        }
+        return String.format("PO-%d-%04d", currentYear, nextSequence);
     }
 
     @Transactional
@@ -38,24 +58,36 @@ public class PurchaseService {
 
         Vendor vendor = vendorService.getVendorById(request.getVendorId());
 
-        long count = purchaseRepository.count() + 1;
-        String poNumber = String.format("PO-%d-%04d", Year.now().getValue(), count);
+        String poNumber = generateNextPurchaseOrderNumber();
 
-        BigDecimal totalAmount = BigDecimal.ZERO;
+        BigDecimal paidAmount = request.getPaidAmount() != null ? request.getPaidAmount() : BigDecimal.ZERO;
+        if (paidAmount.compareTo(BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Paid amount cannot be negative");
+        }
 
         Purchase purchase = Purchase.builder()
                 .purchaseOrderNumber(poNumber)
                 .vendor(vendor)
                 .vendorBillNumber(request.getVendorBillNumber())
                 .purchaseDate(request.getPurchaseDate())
-                .paidAmount(request.getPaidAmount())
+                .paidAmount(paidAmount)
                 .notes(request.getNotes())
                 .items(new ArrayList<>())
                 .build();
 
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        List<StockMovement> movements = new ArrayList<>();
+
         for (PurchaseRequest.PurchaseItemDto itemDto : request.getItems()) {
+            if (itemDto.getQuantity() == null || itemDto.getQuantity() <= 0) {
+                throw new BadRequestException("Purchase item quantity must be greater than zero");
+            }
+            if (itemDto.getUnitCost() == null || itemDto.getUnitCost().compareTo(BigDecimal.ZERO) < 0) {
+                throw new BadRequestException("Purchase item unit cost cannot be negative");
+            }
+
             InventoryItem item = inventoryRepository.findById(itemDto.getItemId())
-                    .orElseThrow(() -> new BadRequestException("Inventory item not found: " + itemDto.getItemId()));
+                    .orElseThrow(() -> new BadRequestException("Inventory item not found with ID: " + itemDto.getItemId()));
 
             BigDecimal lineTotal = itemDto.getUnitCost().multiply(BigDecimal.valueOf(itemDto.getQuantity()));
             totalAmount = totalAmount.add(lineTotal);
@@ -77,32 +109,42 @@ public class PurchaseService {
             item.setCostPrice(itemDto.getUnitCost());
             inventoryRepository.save(item);
 
-            // Log stock movement
+            // Stage stock movement ledger entry
             StockMovement movement = StockMovement.builder()
                     .item(item)
                     .movementType(MovementType.PURCHASE)
                     .quantity(itemDto.getQuantity())
                     .balanceAfter(newBalance)
                     .referenceType("PURCHASE")
-                    .referenceId(null) // Assigned after save
                     .notes("Received from " + vendor.getCompanyName() + " via PO " + poNumber)
                     .performedBy(currentUser)
                     .build();
-            stockMovementRepository.save(movement);
+            movements.add(movement);
         }
 
         purchase.setTotalAmount(totalAmount);
 
         // Calculate payment status
-        if (request.getPaidAmount().compareTo(totalAmount) >= 0) {
+        if (paidAmount.compareTo(totalAmount) >= 0) {
             purchase.setPaymentStatus("PAID");
-        } else if (request.getPaidAmount().compareTo(BigDecimal.ZERO) > 0) {
+        } else if (paidAmount.compareTo(BigDecimal.ZERO) > 0) {
             purchase.setPaymentStatus("PARTIALLY_PAID");
         } else {
             purchase.setPaymentStatus("UNPAID");
         }
 
-        return purchaseRepository.save(purchase);
+        Purchase savedPurchase = purchaseRepository.save(purchase);
+
+        // Associate saved purchase ID with stock movements and persist
+        for (StockMovement m : movements) {
+            m.setReferenceId(savedPurchase.getId());
+            stockMovementRepository.save(m);
+        }
+
+        syncService.publishEvent("PURCHASE", "RECORDED", savedPurchase.getId(), savedPurchase.getPurchaseOrderNumber(), currentUser.getUsername());
+        syncService.publishEvent("INVENTORY", "STOCK_INCREASED", savedPurchase.getId(), savedPurchase.getPurchaseOrderNumber(), currentUser.getUsername());
+
+        return savedPurchase;
     }
 }
 

@@ -4,6 +4,7 @@ import com.techcare.dto.request.VendorRequest;
 import com.techcare.entity.Vendor;
 import com.techcare.exception.BadRequestException;
 import com.techcare.exception.ResourceNotFoundException;
+import com.techcare.repository.PurchaseRepository;
 import com.techcare.repository.VendorRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ import java.util.List;
 public class VendorService {
 
     private final VendorRepository vendorRepository;
+    private final PurchaseRepository purchaseRepository;
 
     @Transactional(readOnly = true)
     public List<Vendor> getAllVendors() {
@@ -67,11 +69,13 @@ public class VendorService {
     @Transactional
     public void deleteVendor(Long id) {
         Vendor vendor = getVendorById(id);
-        try {
-            vendorRepository.delete(vendor);
-        } catch (Exception e) {
+        boolean hasPurchases = !purchaseRepository.findByVendorId(id).isEmpty();
+        if (hasPurchases) {
+            // Cannot hard delete due to foreign key constraints in purchases table; soft-deactivate instead
             vendor.setIsActive(false);
             vendorRepository.save(vendor);
+        } else {
+            vendorRepository.delete(vendor);
         }
     }
 }
