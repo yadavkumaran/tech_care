@@ -1,24 +1,32 @@
 import axios from 'axios';
 
+export const CLOUD_BACKEND_URL = 'https://techcare-backend-6uc4.onrender.com';
+
 export const getApiBaseUrl = () => {
+  // 1. User manual override stored in localStorage
   const customServer = typeof localStorage !== 'undefined' ? localStorage.getItem('techcare_server_url') : null;
   if (customServer && customServer.trim()) {
     return `${customServer.trim().replace(/\/+$/, '')}/api`;
   }
+
+  // 2. Environment variable injected at build time
   const envUrl = (import.meta as any).env?.VITE_API_URL;
-  if (envUrl) {
-    return `${envUrl.replace(/\/+$/, '')}/api`;
+  if (envUrl && envUrl.trim()) {
+    return `${envUrl.trim().replace(/\/+$/, '')}/api`;
   }
-  // Detect Capacitor native mobile environment
-  const isCapacitor = typeof window !== 'undefined' && (
-    Boolean((window as any).Capacitor?.isNativePlatform?.()) ||
-    window.location.protocol === 'capacitor:' ||
-    (window.location.hostname === 'localhost' && window.location.port === '')
-  );
-  if (isCapacitor) {
-    return 'http://192.168.29.113:8080/api';
+
+  // 3. Local desktop browser development (e.g. localhost:5173 running with Vite dev proxy)
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') &&
+    window.location.port !== ''
+  ) {
+    return '/api';
   }
-  return '/api';
+
+  // 4. Default for production website (Render) and mobile app (Capacitor):
+  // Points directly to the live Render cloud backend so users never have to configure URLs manually.
+  return `${CLOUD_BACKEND_URL}/api`;
 };
 
 const api = axios.create({

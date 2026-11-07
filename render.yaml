@@ -37,5 +37,5 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        sync: false # Set to https://<your-backend-name>.onrender.com
+        value: https://techcare-backend-6uc4.onrender.com
 

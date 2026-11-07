@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Cpu, Lock, User as UserIcon, Eye, EyeOff, ShieldCheck, ArrowRight, Loader2, Settings, Wifi, CheckCircle2 } from 'lucide-react';
-import api, { getApiBaseUrl } from '../api/client';
+import api, { getApiBaseUrl, CLOUD_BACKEND_URL } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { ApiResponse, AuthResponse } from '../types';
 
@@ -352,14 +352,14 @@ export const Login: React.FC = () => {
               >
                 <div style={{ fontSize: '0.76rem', fontWeight: 600, color: '#334155', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
                   <Wifi size={13} />
-                  <span>Configure Backend IP / Host</span>
+                  <span>Configure Backend API Server</span>
                 </div>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
                   <input
                     type="text"
                     className="form-control"
                     style={{ height: 34, fontSize: '0.78rem' }}
-                    placeholder="e.g. http://192.168.29.113:8080"
+                    placeholder={CLOUD_BACKEND_URL}
                     value={serverUrlInput}
                     onChange={(e) => setServerUrlInput(e.target.value)}
                   />
@@ -377,9 +377,17 @@ export const Login: React.FC = () => {
                     type="button"
                     className="btn btn-outline btn-xs"
                     style={{ fontSize: '0.70rem' }}
+                    onClick={() => handleSaveServerUrl(CLOUD_BACKEND_URL)}
+                  >
+                    Render Cloud (Live)
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-xs"
+                    style={{ fontSize: '0.70rem' }}
                     onClick={() => handleSaveServerUrl('http://192.168.29.113:8080')}
                   >
-                    Set Local PC (192.168.29.113)
+                    Local PC (192.168.29.113)
                   </button>
                   <button
                     type="button"
