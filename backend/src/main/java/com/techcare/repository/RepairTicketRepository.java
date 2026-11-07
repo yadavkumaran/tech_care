@@ -29,6 +29,22 @@ public interface RepairTicketRepository extends JpaRepository<RepairTicket, Long
 
     long countByStatus(TicketStatus status);
 
+    // Technician-specific metrics
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')")
+    long countActiveByTechnicianId(@Param("techId") Long techId);
+
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status IN ('READY_FOR_DELIVERY', 'DELIVERED')")
+    long countCompletedByTechnicianId(@Param("techId") Long techId);
+
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status IN ('DIAGNOSING', 'ESTIMATION_PENDING', 'WAITING_FOR_PARTS')")
+    long countPendingDiagnosticsByTechnicianId(@Param("techId") Long techId);
+
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.priority IN (com.techcare.entity.enums.TicketPriority.HIGH, com.techcare.entity.enums.TicketPriority.URGENT) AND t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED')")
+    long countHighPriorityByTechnicianId(@Param("techId") Long techId);
+
+    @Query("SELECT t FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status NOT IN ('DELIVERED', 'CANCELLED') ORDER BY t.createdAt DESC")
+    List<RepairTicket> findRecentAssignedTickets(@Param("techId") Long techId, org.springframework.data.domain.Pageable pageable);
+
     @Query("SELECT t FROM RepairTicket t WHERE " +
            "LOWER(t.ticketNumber) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(t.customer.fullName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +

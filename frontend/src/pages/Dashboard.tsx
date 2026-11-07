@@ -11,6 +11,9 @@ import {
   TrendingUp,
   Laptop,
   CheckCircle,
+  Users,
+  AlertCircle,
+  Package,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { StatCard } from '../components/ui/StatCard';
@@ -19,12 +22,17 @@ import { EmptyState } from '../components/ui/EmptyState';
 import api from '../api/client';
 import { ApiResponse, DashboardStats } from '../types';
 import { LayoutContextType } from '../components/Layout';
+import { useAuth } from '../context/AuthContext';
 import { useRealtimeSync } from '../context/SyncContext';
 
 export const Dashboard: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const { user, hasRole } = useAuth();
   const outletContext = useOutletContext<LayoutContextType | null>();
+
+  const isTechnician = hasRole('TECHNICIAN') && !hasRole('ADMIN');
+  const isReceptionist = hasRole('RECEPTIONIST') && !hasRole('ADMIN');
 
   useEffect(() => {
     fetchStats();
@@ -105,172 +113,305 @@ export const Dashboard: React.FC = () => {
     day: 'numeric',
   }).format(new Date());
 
+  const getDashboardTitle = () => {
+    if (isTechnician) return 'Technician Workbench';
+    if (isReceptionist) return 'Service Desk Overview';
+    return 'Operations & Financial Dashboard';
+  };
+
+  const getDashboardSubtitle = () => {
+    if (isTechnician) return `Workbench assignment for ${user?.fullName || 'Technician'} • ${todayStr}`;
+    if (isReceptionist) return `Front-desk intake & customer handover • ${todayStr}`;
+    return `Executive business & workshop overview • ${todayStr}`;
+  };
+
+  const ticketsToDisplay = (isTechnician && stats?.myAssignedTickets && stats.myAssignedTickets.length > 0)
+    ? stats.myAssignedTickets
+    : (stats?.recentTickets || []);
+
   return (
     <>
       <Navbar
-        title="Operations Dashboard"
-        subtitle={`Live overview for ${todayStr}`}
+        title={getDashboardTitle()}
+        subtitle={getDashboardSubtitle()}
         onOpenMobile={outletContext?.openMobileSidebar}
       />
       <div className="page-body">
-        {/* KPI Counter Grid */}
+        {/* KPI Counter Grid (Tailored per role) */}
         <div className="stat-grid">
-          <StatCard
-            title="Active Repairs"
-            value={stats?.totalActiveRepairs ?? (loading ? '—' : 0)}
-            icon={<Wrench size={22} />}
-            iconBg="var(--status-info-bg)"
-            iconColor="var(--status-info-text)"
-            footnote="In workbench queue"
-          />
+          {isTechnician ? (
+            <>
+              <StatCard
+                title="My Active Queue"
+                value={stats?.myActiveJobsCount ?? (loading ? '—' : 0)}
+                icon={<Wrench size={22} />}
+                iconBg="var(--status-info-bg)"
+                iconColor="var(--status-info-text)"
+                footnote="Assigned to your bench"
+              />
 
-          <StatCard
-            title="Pending Quotes"
-            value={stats?.pendingApprovalCount ?? (loading ? '—' : 0)}
-            icon={<Clock size={22} />}
-            iconBg="var(--status-warning-bg)"
-            iconColor="var(--status-warning-text)"
-            footnote="Awaiting customer approval"
-          />
+              <StatCard
+                title="Total Cases Handled"
+                value={stats?.myCompletedCasesCount ?? (loading ? '—' : 0)}
+                icon={<CheckCircle2 size={22} />}
+                iconBg="var(--status-success-bg)"
+                iconColor="var(--status-success-text)"
+                footnote="Repairs completed by you"
+              />
 
-          <StatCard
-            title="Ready for Pickup"
-            value={stats?.readyForDeliveryCount ?? (loading ? '—' : 0)}
-            icon={<CheckCircle2 size={22} />}
-            iconBg="var(--status-success-bg)"
-            iconColor="var(--status-success-text)"
-            footnote="QA passed & bench-tested"
-          />
+              <StatCard
+                title="Awaiting Diagnostics"
+                value={stats?.myPendingDiagnosticsCount ?? (loading ? '—' : 0)}
+                icon={<Clock size={22} />}
+                iconBg="var(--status-warning-bg)"
+                iconColor="var(--status-warning-text)"
+                footnote="Diagnostic & parts queue"
+              />
 
-          <StatCard
-            title="Low Stock Items"
-            value={stats?.lowStockCount ?? (loading ? '—' : 0)}
-            icon={<AlertTriangle size={22} />}
-            iconBg="var(--status-danger-bg)"
-            iconColor="var(--status-danger-text)"
-            footnote="Below reorder threshold"
-          />
+              <StatCard
+                title="High Priority Jobs"
+                value={stats?.myHighPriorityCount ?? (loading ? '—' : 0)}
+                icon={<AlertCircle size={22} />}
+                iconBg="var(--status-danger-bg)"
+                iconColor="var(--status-danger-text)"
+                footnote="Urgent & high priority"
+              />
+            </>
+          ) : isReceptionist ? (
+            <>
+              <StatCard
+                title="Active Repair Queue"
+                value={stats?.totalActiveRepairs ?? (loading ? '—' : 0)}
+                icon={<Wrench size={22} />}
+                iconBg="var(--status-info-bg)"
+                iconColor="var(--status-info-text)"
+                footnote="Devices under service"
+              />
+
+              <StatCard
+                title="Pending Quote Approvals"
+                value={stats?.pendingApprovalCount ?? (loading ? '—' : 0)}
+                icon={<Clock size={22} />}
+                iconBg="var(--status-warning-bg)"
+                iconColor="var(--status-warning-text)"
+                footnote="Call customer to confirm"
+              />
+
+              <StatCard
+                title="Ready for Customer Pickup"
+                value={stats?.readyForDeliveryCount ?? (loading ? '—' : 0)}
+                icon={<CheckCircle2 size={22} />}
+                iconBg="var(--status-success-bg)"
+                iconColor="var(--status-success-text)"
+                footnote="Handover at front counter"
+              />
+
+              <StatCard
+                title="Registered Clients"
+                value={stats?.totalCustomersCount ?? (loading ? '—' : 0)}
+                icon={<Users size={22} />}
+                iconBg="rgba(147, 51, 234, 0.12)"
+                iconColor="#9333ea"
+                footnote="Total customer records"
+              />
+            </>
+          ) : (
+            <>
+              <StatCard
+                title="Active Repairs"
+                value={stats?.totalActiveRepairs ?? (loading ? '—' : 0)}
+                icon={<Wrench size={22} />}
+                iconBg="var(--status-info-bg)"
+                iconColor="var(--status-info-text)"
+                footnote="In workbench queue"
+              />
+
+              <StatCard
+                title="Pending Quotes"
+                value={stats?.pendingApprovalCount ?? (loading ? '—' : 0)}
+                icon={<Clock size={22} />}
+                iconBg="var(--status-warning-bg)"
+                iconColor="var(--status-warning-text)"
+                footnote="Awaiting customer approval"
+              />
+
+              <StatCard
+                title="Ready for Pickup"
+                value={stats?.readyForDeliveryCount ?? (loading ? '—' : 0)}
+                icon={<CheckCircle2 size={22} />}
+                iconBg="var(--status-success-bg)"
+                iconColor="var(--status-success-text)"
+                footnote="QA passed & bench-tested"
+              />
+
+              <StatCard
+                title="Low Stock Items"
+                value={stats?.lowStockCount ?? (loading ? '—' : 0)}
+                icon={<AlertTriangle size={22} />}
+                iconBg="var(--status-danger-bg)"
+                iconColor="var(--status-danger-text)"
+                footnote="Below reorder threshold"
+              />
+            </>
+          )}
         </div>
 
-        {/* Financial Highlights */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
-            gap: 14,
-            marginBottom: 20,
-          }}
-        >
-          <div className="card" style={{ margin: 0, padding: 18 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 10,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 8,
-                    backgroundColor: 'var(--status-success-bg)',
-                    color: 'var(--status-success-text)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <IndianRupee size={18} />
-                </div>
-                <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                  Today's Collected Revenue
-                </span>
+        {/* Section below KPIs: Technician Workbench Banner OR Financial Highlights */}
+        {isTechnician ? (
+          <div
+            className="card"
+            style={{
+              marginBottom: 20,
+              padding: '16px 20px',
+              background: 'linear-gradient(135deg, rgba(0, 113, 227, 0.06) 0%, rgba(0, 113, 227, 0.02) 100%)',
+              border: '1px solid rgba(0, 113, 227, 0.18)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 14,
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700, fontSize: '0.98rem', color: 'var(--text-primary)' }}>
+                Workstation: {user?.fullName || 'Technician'}
               </div>
-              <Badge variant="success">Settled</Badge>
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 3 }}>
+                You have <strong>{stats?.myActiveJobsCount || 0} active jobs</strong> currently on your bench. Diagnose faults, consume needed spare parts, and mark ready for delivery once repair QA is verified.
+              </div>
             </div>
-            <div
-              style={{
-                fontSize: '1.75rem',
-                fontWeight: 700,
-                letterSpacing: '-0.03em',
-                color: 'var(--text-primary)',
-              }}
-              className="tabular"
-            >
-              ₹{Number(stats?.todayRevenue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-            </div>
-            <div
-              style={{
-                fontSize: '0.76rem',
-                color: 'var(--text-tertiary)',
-                marginTop: 6,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-              }}
-            >
-              <TrendingUp size={13} color="#059669" />
-              <span>Cash, UPI, and Card collections today</span>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <Link to="/tickets" className="btn btn-primary btn-sm">
+                <Wrench size={14} />
+                <span>My Assigned Tickets</span>
+              </Link>
+              <Link to="/inventory" className="btn btn-outline btn-sm">
+                <Package size={14} />
+                <span>Check Parts Inventory</span>
+              </Link>
             </div>
           </div>
-
-          <div className="card" style={{ margin: 0, padding: 18 }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                marginBottom: 10,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: 8,
-                    backgroundColor: 'var(--status-warning-bg)',
-                    color: 'var(--status-warning-text)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <FileText size={18} />
+        ) : (
+          /* Financial Highlights (Only shown for Admin and Receptionist) */
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))',
+              gap: 14,
+              marginBottom: 20,
+            }}
+          >
+            <div className="card" style={{ margin: 0, padding: 18 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      backgroundColor: 'var(--status-success-bg)',
+                      color: 'var(--status-success-text)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <IndianRupee size={18} />
+                  </div>
+                  <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                    {isReceptionist ? "Today's Counter Collections" : "Today's Collected Revenue"}
+                  </span>
                 </div>
-                <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                  Outstanding Customer Dues
-                </span>
+                <Badge variant="success">Settled</Badge>
               </div>
-              <Badge variant="warning">Receivables</Badge>
+              <div
+                style={{
+                  fontSize: '1.75rem',
+                  fontWeight: 700,
+                  letterSpacing: '-0.03em',
+                  color: 'var(--text-primary)',
+                }}
+                className="tabular"
+              >
+                ₹{Number(stats?.todayRevenue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div
+                style={{
+                  fontSize: '0.76rem',
+                  color: 'var(--text-tertiary)',
+                  marginTop: 6,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 5,
+                }}
+              >
+                <TrendingUp size={13} color="#059669" />
+                <span>Cash, UPI, and Card receipts today</span>
+              </div>
             </div>
-            <div
-              style={{
-                fontSize: '1.75rem',
-                fontWeight: 700,
-                letterSpacing: '-0.03em',
-                color: '#b45309',
-              }}
-              className="tabular"
-            >
-              ₹{Number(stats?.totalOutstandingDues || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-            </div>
-            <div
-              style={{
-                fontSize: '0.76rem',
-                color: 'var(--text-tertiary)',
-                marginTop: 6,
-              }}
-            >
-              Total unpaid and partially settled invoices
+
+            <div className="card" style={{ margin: 0, padding: 18 }}>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      backgroundColor: 'var(--status-warning-bg)',
+                      color: 'var(--status-warning-text)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <FileText size={18} />
+                  </div>
+                  <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                    {isReceptionist ? 'Unsettled Delivery Invoices' : 'Outstanding Customer Dues'}
+                  </span>
+                </div>
+                <Badge variant="warning">Receivables</Badge>
+              </div>
+              <div
+                style={{
+                  fontSize: '1.75rem',
+                  fontWeight: 700,
+                  letterSpacing: '-0.03em',
+                  color: '#b45309',
+                }}
+                className="tabular"
+              >
+                ₹{Number(stats?.totalOutstandingDues || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+              <div
+                style={{
+                  fontSize: '0.76rem',
+                  color: 'var(--text-tertiary)',
+                  marginTop: 6,
+                }}
+              >
+                Total unpaid and partially settled invoices to collect
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Recent Repair Tickets */}
+        {/* Repair Tickets Table */}
         <div className="card" style={{ padding: 0 }}>
           <div
             style={{
@@ -283,8 +424,10 @@ export const Dashboard: React.FC = () => {
           >
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <h3 className="card-title">Recent Repair Tickets</h3>
-                {stats?.recentTickets && stats.recentTickets.length > 0 && (
+                <h3 className="card-title">
+                  {isTechnician ? 'My Assigned Workbench Jobs' : 'Recent Repair Tickets'}
+                </h3>
+                {ticketsToDisplay.length > 0 && (
                   <span
                     style={{
                       fontSize: '0.72rem',
@@ -296,12 +439,14 @@ export const Dashboard: React.FC = () => {
                       color: 'var(--text-secondary)',
                     }}
                   >
-                    {stats.recentTickets.length} active
+                    {ticketsToDisplay.length} jobs
                   </span>
                 )}
               </div>
               <p className="card-subtitle">
-                Latest customer devices serviced on the workbench
+                {isTechnician
+                  ? 'Customer hardware assigned to your station for diagnostics & repair'
+                  : 'Latest customer devices serviced on the workbench'}
               </p>
             </div>
             <Link to="/tickets" className="btn btn-outline btn-sm">
@@ -326,8 +471,8 @@ export const Dashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {stats?.recentTickets && stats.recentTickets.length > 0 ? (
-                    stats.recentTickets.map((t) => (
+                  {ticketsToDisplay.length > 0 ? (
+                    ticketsToDisplay.map((t) => (
                       <tr key={t.id}>
                         <td style={{ fontWeight: 700 }}>
                           <Link
@@ -435,8 +580,8 @@ export const Dashboard: React.FC = () => {
 
           {/* Mobile Card View */}
           <div className="mobile-card-list" style={{ padding: 12 }}>
-            {stats?.recentTickets && stats.recentTickets.length > 0 ? (
-              stats.recentTickets.map((t) => (
+            {ticketsToDisplay.length > 0 ? (
+              ticketsToDisplay.map((t) => (
                 <div key={t.id} className="mobile-data-card">
                   <div className="mobile-card-header">
                     <div>

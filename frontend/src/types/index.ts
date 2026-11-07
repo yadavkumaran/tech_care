@@ -156,9 +156,20 @@ export interface DashboardStats {
   pendingApprovalCount: number;
   readyForDeliveryCount: number;
   lowStockCount: number;
-  todayRevenue: number;
-  totalOutstandingDues: number;
+  todayRevenue?: number;
+  totalOutstandingDues?: number;
   recentTickets: RepairTicket[];
+
+  // Technician-specific metrics
+  myActiveJobsCount?: number;
+  myCompletedCasesCount?: number;
+  myPendingDiagnosticsCount?: number;
+  myHighPriorityCount?: number;
+  myAssignedTickets?: RepairTicket[];
+
+  // Receptionist / Operations metrics
+  totalCustomersCount?: number;
+  activeTechniciansCount?: number;
 }
 
 export interface ApiResponse<T> {

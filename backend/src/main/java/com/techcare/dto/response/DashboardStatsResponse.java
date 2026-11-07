@@ -23,6 +23,17 @@ public class DashboardStatsResponse {
     private BigDecimal todayRevenue;
     private BigDecimal totalOutstandingDues;
 
+    // Technician-specific metrics (cases handled, active queue, urgent jobs)
+    private long myActiveJobsCount;
+    private long myCompletedCasesCount;
+    private long myPendingDiagnosticsCount;
+    private long myHighPriorityCount;
+
+    // Receptionist / Operations metrics
+    private long totalCustomersCount;
+    private long activeTechniciansCount;
+
     private List<RepairTicket> recentTickets;
+    private List<RepairTicket> myAssignedTickets;
 }
 
