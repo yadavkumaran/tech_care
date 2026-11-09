@@ -56,5 +56,17 @@ public interface RepairTicketRepository extends JpaRepository<RepairTicket, Long
            "LOWER(t.customer.fullName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "t.customer.phone LIKE CONCAT('%', :query, '%')")
     List<RepairTicket> searchTickets(@Param("query") String query);
+
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED') AND t.estimatedCompletionDate >= :startOfDay AND t.estimatedCompletionDate <= :endOfDay")
+    long countDueToday(@Param("startOfDay") java.time.LocalDateTime startOfDay, @Param("endOfDay") java.time.LocalDateTime endOfDay);
+
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED') AND t.estimatedCompletionDate < :startOfDay")
+    long countOverdue(@Param("startOfDay") java.time.LocalDateTime startOfDay);
+
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED') AND t.estimatedCompletionDate >= :startOfDay AND t.estimatedCompletionDate <= :endOfDay")
+    long countDueTodayByTechnicianId(@Param("techId") Long techId, @Param("startOfDay") java.time.LocalDateTime startOfDay, @Param("endOfDay") java.time.LocalDateTime endOfDay);
+
+    @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED') AND t.estimatedCompletionDate < :startOfDay")
+    long countOverdueByTechnicianId(@Param("techId") Long techId, @Param("startOfDay") java.time.LocalDateTime startOfDay);
 }
 

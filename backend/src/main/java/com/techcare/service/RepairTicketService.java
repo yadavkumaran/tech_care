@@ -483,4 +483,29 @@ public class RepairTicketService {
         syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), "Customer");
         return updated;
     }
+
+    @Transactional
+    public RepairTicket sendDeliveryReminder(Long ticketId, String channel, User currentUser) {
+        RepairTicket ticket = getTicketById(ticketId);
+        if (ticket.getStatus() != TicketStatus.READY_FOR_DELIVERY) {
+            throw new BadRequestException("Reminders can only be dispatched for tickets that are ready for delivery. Current status: " + ticket.getStatus());
+        }
+
+        ticket.setReminderCount(ticket.getReminderCount() == null ? 1 : ticket.getReminderCount() + 1);
+        ticket.setLastReminderSentAt(LocalDateTime.now());
+        RepairTicket updated = ticketRepository.save(ticket);
+
+        String channelName = channel != null ? channel.toUpperCase() : "WHATSAPP";
+        RepairTicketLog log = RepairTicketLog.builder()
+                .ticket(updated)
+                .previousStatus(TicketStatus.READY_FOR_DELIVERY.name())
+                .newStatus(TicketStatus.READY_FOR_DELIVERY.name())
+                .remarks("Customer pickup reminder #" + updated.getReminderCount() + " dispatched via " + channelName)
+                .changedBy(currentUser)
+                .build();
+        ticketLogRepository.save(log);
+
+        syncService.publishEvent("TICKET", "REMINDER_SENT", updated.getId(), updated.getTicketNumber(), currentUser != null ? currentUser.getFullName() : "System");
+        return updated;
+    }
 }

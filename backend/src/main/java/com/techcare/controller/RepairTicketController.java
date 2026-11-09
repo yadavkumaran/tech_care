@@ -130,6 +130,17 @@ public class RepairTicketController {
         return ResponseEntity.ok(ApiResponse.success(attachments));
     }
 
+    @PostMapping("/{id}/remind-delivery")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
+    public ResponseEntity<ApiResponse<RepairTicket>> sendDeliveryReminder(
+            @PathVariable Long id,
+            @RequestParam(required = false, defaultValue = "WHATSAPP") String channel,
+            @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        User user = getCurrentUser(userDetails);
+        RepairTicket updated = ticketService.sendDeliveryReminder(id, channel, user);
+        return ResponseEntity.ok(ApiResponse.success("Delivery reminder logged successfully", updated));
+    }
+
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Void>> deleteTicket(

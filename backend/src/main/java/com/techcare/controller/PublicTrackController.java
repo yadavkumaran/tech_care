@@ -1,12 +1,22 @@
 package com.techcare.controller;
 
+import com.techcare.dto.request.RazorpayOrderRequest;
+import com.techcare.dto.request.RazorpayVerifyRequest;
 import com.techcare.dto.response.ApiResponse;
 import com.techcare.dto.response.PublicTicketResponse;
+import com.techcare.dto.response.RazorpayOrderResponse;
+import com.techcare.entity.Invoice;
+import com.techcare.entity.Payment;
 import com.techcare.entity.RepairTicket;
+import com.techcare.repository.InvoiceRepository;
+import com.techcare.service.RazorpayService;
 import com.techcare.service.RepairTicketService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/public/track")
@@ -14,6 +24,8 @@ import org.springframework.web.bind.annotation.*;
 public class PublicTrackController {
 
     private final RepairTicketService ticketService;
+    private final InvoiceRepository invoiceRepository;
+    private final RazorpayService razorpayService;
 
     @GetMapping("/{ticketNumber}")
     public ResponseEntity<ApiResponse<PublicTicketResponse>> trackTicket(@PathVariable String ticketNumber) {
@@ -33,6 +45,20 @@ public class PublicTrackController {
         return ResponseEntity.ok(ApiResponse.success("Repair quotation declined", toPublicResponse(ticket)));
     }
 
+    @PostMapping("/payments/razorpay/create-order")
+    public ResponseEntity<ApiResponse<RazorpayOrderResponse>> createPublicRazorpayOrder(
+            @Valid @RequestBody RazorpayOrderRequest request) {
+        RazorpayOrderResponse order = razorpayService.createOrder(request);
+        return ResponseEntity.ok(ApiResponse.success("Payment order created", order));
+    }
+
+    @PostMapping("/payments/razorpay/verify")
+    public ResponseEntity<ApiResponse<Payment>> verifyPublicRazorpayPayment(
+            @Valid @RequestBody RazorpayVerifyRequest request) {
+        Payment payment = razorpayService.verifyAndRecordPayment(request, null);
+        return ResponseEntity.ok(ApiResponse.success("Payment verified and settled successfully", payment));
+    }
+
     private PublicTicketResponse toPublicResponse(RepairTicket t) {
         String maskedPhone = null;
         if (t.getCustomer() != null && t.getCustomer().getPhone() != null) {
@@ -44,7 +70,9 @@ public class PublicTrackController {
             }
         }
 
-        return PublicTicketResponse.builder()
+        Optional<Invoice> invoiceOpt = invoiceRepository.findByRepairTicketId(t.getId());
+
+        PublicTicketResponse.PublicTicketResponseBuilder builder = PublicTicketResponse.builder()
                 .ticketNumber(t.getTicketNumber())
                 .status(t.getStatus())
                 .priority(t.getPriority())
@@ -60,7 +88,17 @@ public class PublicTrackController {
                 .estimatedCompletionDate(t.getEstimatedCompletionDate())
                 .createdAt(t.getCreatedAt())
                 .completedAt(t.getCompletedAt())
-                .deliveredAt(t.getDeliveredAt())
-                .build();
+                .deliveredAt(t.getDeliveredAt());
+
+        if (invoiceOpt.isPresent()) {
+            Invoice inv = invoiceOpt.get();
+            builder.invoiceId(inv.getId())
+                    .invoiceNumber(inv.getInvoiceNumber())
+                    .invoiceTotal(inv.getTotalAmount())
+                    .invoiceBalance(inv.getBalanceAmount())
+                    .invoiceStatus(inv.getStatus().name());
+        }
+
+        return builder.build();
     }
 }

@@ -31,4 +31,12 @@ public class PublicTicketResponse {
     private LocalDateTime createdAt;
     private LocalDateTime completedAt;
     private LocalDateTime deliveredAt;
+
+    // Optional Invoice details for online settlement
+    private Long invoiceId;
+    private String invoiceNumber;
+    private BigDecimal invoiceTotal;
+    private BigDecimal invoiceBalance;
+    private String invoiceStatus;
 }
+

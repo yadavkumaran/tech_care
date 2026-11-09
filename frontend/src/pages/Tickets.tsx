@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useOutletContext, useNavigate } from 'react-router-dom';
+import { useOutletContext, useNavigate, useLocation } from 'react-router-dom';
 import {
   Plus,
   Search,
@@ -28,6 +28,9 @@ import {
   ReceiptText,
   Printer,
   MessageCircle,
+  Calendar,
+  Flame,
+  Send,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { SearchInput } from '../components/ui/SearchInput';
@@ -117,12 +120,27 @@ export const Tickets: React.FC = () => {
   const [submittingStatus, setSubmittingStatus] = useState(false);
   const [consumingPart, setConsumingPart] = useState(false);
 
+  // Target completion date & delivery reminder state
+  const [intakeTargetDate, setIntakeTargetDate] = useState<string>('');
+  const [diagTargetDate, setDiagTargetDate] = useState<string>('');
+  const [sendingReminder, setSendingReminder] = useState(false);
+
   const { user, hasRole } = useAuth();
   const isTechnician = hasRole('TECHNICIAN') && !hasRole('ADMIN');
   const { toast } = useToast();
   const { broadcastLocalUpdate } = useSync();
   const outletContext = useOutletContext<LayoutContextType | null>();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  // Support direct filter from URL ?filter=DUE_TODAY or ?filter=OVERDUE
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const filterParam = params.get('filter');
+    if (filterParam) {
+      setSelectedStatus(filterParam);
+    }
+  }, [location.search]);
 
   // If user is a technician, default technician filter to their own account
   useEffect(() => {
@@ -130,6 +148,88 @@ export const Tickets: React.FC = () => {
       setSelectedTechFilter(user.id);
     }
   }, [user?.id, isTechnician]);
+
+  const getSlaDeadlineInfo = (ticket: RepairTicket) => {
+    if (!ticket.estimatedCompletionDate) return null;
+    if (['DELIVERED', 'CANCELLED', 'REJECTED'].includes(ticket.status)) return null;
+
+    const targetDate = new Date(ticket.estimatedCompletionDate);
+    const now = new Date();
+
+    const targetDay = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate()).getTime();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const oneDay = 24 * 60 * 60 * 1000;
+    const diffDays = Math.round((targetDay - today) / oneDay);
+
+    if (diffDays === 0) {
+      return {
+        type: 'DUE_TODAY' as const,
+        label: '🔥 Due Today',
+        fullLabel: '🔥 Target: Today is the last date!',
+        badgeClass: 'badge-danger',
+        variant: 'danger' as BadgeVariant,
+        tooltip: 'Promised completion is today! Prioritize workbench execution.',
+      };
+    } else if (diffDays < 0) {
+      const daysOverdue = Math.abs(diffDays);
+      return {
+        type: 'OVERDUE' as const,
+        label: `⚠️ Overdue (${daysOverdue}d)`,
+        fullLabel: `⚠️ Overdue by ${daysOverdue} day${daysOverdue > 1 ? 's' : ''}`,
+        badgeClass: 'badge-danger',
+        variant: 'danger' as BadgeVariant,
+        tooltip: `Target date was ${targetDate.toLocaleDateString()}. Overdue by ${daysOverdue} day${daysOverdue > 1 ? 's' : ''}!`,
+      };
+    } else {
+      return {
+        type: 'UPCOMING' as const,
+        label: `Target: ${targetDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })}`,
+        fullLabel: `Target: ${targetDate.toLocaleDateString('en-IN', { month: 'short', day: 'numeric' })} (${diffDays}d left)`,
+        badgeClass: 'badge-neutral',
+        variant: 'neutral' as BadgeVariant,
+        tooltip: `Target completion in ${diffDays} day${diffDays > 1 ? 's' : ''}`,
+      };
+    }
+  };
+
+  const handleSendDeliveryReminder = async (channel: 'WHATSAPP' | 'SMS' | 'CALL') => {
+    if (!activeTicket) return;
+    setSendingReminder(true);
+    try {
+      if (channel === 'WHATSAPP') {
+        const cleanPhone = (activeTicket.customer?.phone || '').replace(/\D/g, '');
+        const intlPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+        const msg = `*TechCare Service Center — Device Ready for Pickup*\n\n` +
+          `Dear *${activeTicket.customer?.fullName || 'Customer'}*,\n` +
+          `Your *${activeTicket.device?.brand || ''} ${activeTicket.device?.modelName || 'device'}* (Job #${activeTicket.ticketNumber}) has been diagnosed, repaired, and is ready for collection at our service center.\n\n` +
+          `• *Problem Repaired:* ${activeTicket.problemReported}\n` +
+          `• *Estimated Total:* ₹${Number(activeTicket.estimatedCost || 0).toFixed(2)}\n` +
+          `• *Collection Counter:* TechCare Service Center\n` +
+          `• *Operating Hours:* Mon - Sat, 10:00 AM - 8:00 PM\n\n` +
+          `Please present your Ticket #${activeTicket.ticketNumber} upon arrival.\n` +
+          `Thank you for choosing TechCare!`;
+        window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+      } else if (channel === 'SMS') {
+        const cleanPhone = (activeTicket.customer?.phone || '').replace(/\D/g, '');
+        const smsBody = `TechCare: Your ${activeTicket.device?.brand || ''} ${activeTicket.device?.modelName || 'device'} (#${activeTicket.ticketNumber}) is repaired and ready for pickup! Hours: 10AM-8PM.`;
+        window.open(`sms:${cleanPhone}?body=${encodeURIComponent(smsBody)}`, '_self');
+      } else if (channel === 'CALL') {
+        window.open(`tel:${activeTicket.customer?.phone}`, '_self');
+      }
+
+      const res = await api.post<ApiResponse<RepairTicket>>(`/tickets/${activeTicket.id}/remind-delivery?channel=${channel}`);
+      if (res.data.success && res.data.data) {
+        setActiveTicket(res.data.data);
+      }
+      fetchTickets(false);
+      broadcastLocalUpdate('TICKET', 'STATUS_CHANGED');
+      toast.success(`Customer delivery reminder dispatched via ${channel}!`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to dispatch delivery reminder');
+    } finally {
+      setSendingReminder(false);
+    }
+  };
 
   useEffect(() => {
     fetchTickets(true);
@@ -374,6 +474,7 @@ export const Tickets: React.FC = () => {
         assignedTechnicianId: selectedTechId || null,
         problemReported: problemReported.trim(),
         priority,
+        estimatedCompletionDate: intakeTargetDate ? `${intakeTargetDate}T18:00:00` : null,
       });
 
       setShowIntakeModal(false);
@@ -397,6 +498,7 @@ export const Tickets: React.FC = () => {
     setSelectedDeviceId('');
     setSelectedTechId('');
     setProblemReported('');
+    setIntakeTargetDate('');
     setIsNewCustomer(false);
     setIsNewDeviceForExistingCustomer(false);
     setNewCustName('');
@@ -419,6 +521,7 @@ export const Tickets: React.FC = () => {
     setDiagNotes(ticket.diagnosticNotes || '');
     setEstCost(ticket.estimatedCost ? String(ticket.estimatedCost) : '');
     setLaborCharge(ticket.laborCharge ? String(ticket.laborCharge) : '');
+    setDiagTargetDate(ticket.estimatedCompletionDate ? ticket.estimatedCompletionDate.split('T')[0] : '');
     setNewStatus('');
     setStatusRemarks('');
 
@@ -438,10 +541,12 @@ export const Tickets: React.FC = () => {
     try {
       const updatedEst = estCost ? Number(estCost) : 0;
       const updatedLabor = laborCharge ? Number(laborCharge) : 0;
+      const formattedDate = diagTargetDate ? `${diagTargetDate}T18:00:00` : null;
       await api.patch(`/tickets/${activeTicket.id}/diagnosis`, {
         diagnosticNotes: diagNotes,
         estimatedCost: updatedEst,
         laborCharge: updatedLabor,
+        estimatedCompletionDate: formattedDate,
       });
       toast.success('Diagnosis and quotation updated successfully');
       setActiveTicket({
@@ -449,6 +554,7 @@ export const Tickets: React.FC = () => {
         diagnosticNotes: diagNotes,
         estimatedCost: updatedEst,
         laborCharge: updatedLabor,
+        estimatedCompletionDate: formattedDate || undefined,
       });
       fetchTickets();
     } catch (err: any) {
@@ -607,6 +713,12 @@ export const Tickets: React.FC = () => {
       if (t.status === 'DELIVERED' || t.status === 'CANCELLED' || t.status === 'REJECTED') {
         return false;
       }
+    } else if (selectedStatus === 'DUE_TODAY') {
+      const sla = getSlaDeadlineInfo(t);
+      if (sla?.type !== 'DUE_TODAY') return false;
+    } else if (selectedStatus === 'OVERDUE') {
+      const sla = getSlaDeadlineInfo(t);
+      if (sla?.type !== 'OVERDUE') return false;
     } else if (selectedStatus !== 'ALL') {
       if (t.status !== selectedStatus) {
         return false;
@@ -723,7 +835,9 @@ export const Tickets: React.FC = () => {
 
   const statusFilterTabs = [
     { key: 'ONGOING', label: '⚡ Ongoing Repairs' },
-    { key: 'READY_FOR_DELIVERY', label: 'Ready for Pickup' },
+    { key: 'DUE_TODAY', label: '🔥 Due Today (Last Date)' },
+    { key: 'OVERDUE', label: '⚠️ Overdue' },
+    { key: 'READY_FOR_DELIVERY', label: '📦 Ready for Pickup' },
     { key: 'DELIVERED', label: 'Delivered (Completed)' },
     { key: 'ALL', label: 'All Tickets' },
     { key: 'IN_PROGRESS', label: 'In Progress' },
@@ -942,7 +1056,28 @@ export const Tickets: React.FC = () => {
                           </span>
                         )}
                       </td>
-                      <td>{getStatusBadge(t.status)}</td>
+                      <td>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                          {getStatusBadge(t.status)}
+                          {(() => {
+                            const sla = getSlaDeadlineInfo(t);
+                            if (!sla) return null;
+                            return (
+                              <span
+                                className={`badge badge-sm ${sla.type === 'DUE_TODAY' || sla.type === 'OVERDUE' ? 'badge-danger' : 'badge-neutral'}`}
+                                style={{
+                                  fontSize: '0.68rem',
+                                  padding: '2px 6px',
+                                  fontWeight: sla.type === 'DUE_TODAY' ? 700 : 600,
+                                }}
+                                title={sla.tooltip}
+                              >
+                                {sla.label}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                      </td>
                       <td>
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }} className="tabular">
                           ₹{Number(t.estimatedCost || 0).toFixed(2)}
@@ -1065,7 +1200,25 @@ export const Tickets: React.FC = () => {
                       {getPriorityBadge(t.priority)}
                     </div>
                   </div>
-                  {getStatusBadge(t.status)}
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                    {getStatusBadge(t.status)}
+                    {(() => {
+                      const sla = getSlaDeadlineInfo(t);
+                      if (!sla) return null;
+                      return (
+                        <span
+                          className={`badge badge-sm ${sla.type === 'DUE_TODAY' || sla.type === 'OVERDUE' ? 'badge-danger' : 'badge-neutral'}`}
+                          style={{
+                            fontSize: '0.66rem',
+                            padding: '2px 5px',
+                            fontWeight: sla.type === 'DUE_TODAY' ? 700 : 600,
+                          }}
+                        >
+                          {sla.label}
+                        </span>
+                      );
+                    })()}
+                  </div>
                 </div>
 
                 <div className="mobile-card-body">
@@ -1478,7 +1631,7 @@ export const Tickets: React.FC = () => {
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
             <div className="form-group">
               <label className="form-label">Assign Technician</label>
               <select
@@ -1506,6 +1659,52 @@ export const Tickets: React.FC = () => {
                 <option value="HIGH">High</option>
                 <option value="URGENT">Urgent</option>
               </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Promised Target Date</label>
+              <input
+                type="date"
+                className="form-control"
+                value={intakeTargetDate}
+                onChange={(e) => setIntakeTargetDate(e.target.value)}
+              />
+              <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  style={{ fontSize: '0.68rem', padding: '1px 6px' }}
+                  onClick={() => {
+                    const d = new Date();
+                    setIntakeTargetDate(d.toISOString().split('T')[0]);
+                  }}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  style={{ fontSize: '0.68rem', padding: '1px 6px' }}
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 1);
+                    setIntakeTargetDate(d.toISOString().split('T')[0]);
+                  }}
+                >
+                  +1d
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  style={{ fontSize: '0.68rem', padding: '1px 6px' }}
+                  onClick={() => {
+                    const d = new Date();
+                    d.setDate(d.getDate() + 2);
+                    setIntakeTargetDate(d.toISOString().split('T')[0]);
+                  }}
+                >
+                  +2d
+                </button>
+              </div>
             </div>
           </div>
 
@@ -1753,6 +1952,70 @@ export const Tickets: React.FC = () => {
                 ) : null}
               </div>
             )}
+
+            {/* Customer Delivery Notification & Pickup Reminders */}
+            {activeTicket.status === 'READY_FOR_DELIVERY' && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '12px 14px',
+                  background: 'rgba(37, 211, 102, 0.08)',
+                  border: '1px solid rgba(37, 211, 102, 0.25)',
+                  borderRadius: 10,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <MessageCircle size={18} color="#16a34a" />
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--text-primary)' }}>
+                        Customer Delivery Notification & Pickup Reminders
+                      </div>
+                      <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                        {activeTicket.reminderCount && activeTicket.reminderCount > 0
+                          ? `Total Reminders Sent: ${activeTicket.reminderCount} • Last: ${activeTicket.lastReminderSentAt ? new Date(activeTicket.lastReminderSentAt).toLocaleString('en-IN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}`
+                          : 'No delivery reminders dispatched to customer yet.'}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{ background: '#25D366', color: '#fff', border: 'none', gap: 5, fontSize: '0.78rem' }}
+                      disabled={sendingReminder}
+                      onClick={() => handleSendDeliveryReminder('WHATSAPP')}
+                    >
+                      <MessageCircle size={14} />
+                      <span>WhatsApp Pickup Alert</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      style={{ gap: 5, fontSize: '0.78rem' }}
+                      disabled={sendingReminder}
+                      onClick={() => handleSendDeliveryReminder('SMS')}
+                    >
+                      <Send size={13} />
+                      <span>SMS</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      style={{ gap: 5, fontSize: '0.78rem' }}
+                      disabled={sendingReminder}
+                      onClick={() => handleSendDeliveryReminder('CALL')}
+                    >
+                      <Phone size={13} />
+                      <span>Call</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Section 2: Diagnosis & Labor Charge */}
@@ -1780,7 +2043,7 @@ export const Tickets: React.FC = () => {
                     onChange={(e) => setDiagNotes(e.target.value)}
                   />
                 </div>
-                <div className="modal-form-grid-3">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 10, alignItems: 'flex-end' }}>
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label">Estimated Total (₹)</label>
                     <input
@@ -1801,6 +2064,15 @@ export const Tickets: React.FC = () => {
                       value={laborCharge}
                       onChange={(e) => setLaborCharge(e.target.value)}
                       placeholder="e.g. 500"
+                    />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label className="form-label">Target Completion</label>
+                    <input
+                      type="date"
+                      className="form-control"
+                      value={diagTargetDate}
+                      onChange={(e) => setDiagTargetDate(e.target.value)}
                     />
                   </div>
                   <button

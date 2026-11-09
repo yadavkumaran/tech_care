@@ -16,9 +16,11 @@ import {
   Loader2,
   Calendar,
   IndianRupee,
+  CreditCard,
 } from 'lucide-react';
 import api from '../api/client';
 import { ApiResponse, TicketStatus, TicketPriority } from '../types';
+import { launchRazorpayCheckout, RazorpayOrderData } from '../utils/razorpay';
 
 interface PublicTicket {
   ticketNumber: string;
@@ -37,6 +39,11 @@ interface PublicTicket {
   createdAt: string;
   completedAt?: string;
   deliveredAt?: string;
+  invoiceId?: number;
+  invoiceNumber?: string;
+  invoiceTotal?: number;
+  invoiceBalance?: number;
+  invoiceStatus?: string;
 }
 
 const STAGES: { key: TicketStatus; label: string }[] = [
@@ -57,6 +64,7 @@ export const PublicTrack: React.FC = () => {
   const [error, setError] = useState('');
   const [actionSuccess, setActionSuccess] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [payingOnline, setPayingOnline] = useState(false);
 
   useEffect(() => {
     if (paramTicketNumber && paramTicketNumber.trim()) {
@@ -125,6 +133,54 @@ export const PublicTrack: React.FC = () => {
       alert(err.response?.data?.message || 'Failed to submit decline. Please contact us.');
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleCustomerOnlinePayment = async () => {
+    if (!ticket || !ticket.invoiceId) return;
+    setPayingOnline(true);
+    try {
+      const orderRes = await api.post<ApiResponse<RazorpayOrderData>>('/public/track/payments/razorpay/create-order', {
+        invoiceId: ticket.invoiceId,
+        amount: ticket.invoiceBalance,
+      });
+
+      if (!orderRes.data.success || !orderRes.data.data) {
+        throw new Error(orderRes.data.message || 'Failed to initialize payment gateway');
+      }
+
+      const orderData = orderRes.data.data;
+
+      await launchRazorpayCheckout(
+        orderData,
+        async (paymentRes) => {
+          try {
+            const verifyRes = await api.post<ApiResponse<any>>('/public/track/payments/razorpay/verify', {
+              invoiceId: ticket.invoiceId,
+              razorpayOrderId: paymentRes.razorpay_order_id,
+              razorpayPaymentId: paymentRes.razorpay_payment_id,
+              razorpaySignature: paymentRes.razorpay_signature,
+              paymentMethod: 'UPI',
+            });
+            if (verifyRes.data.success) {
+              setActionSuccess('🎉 Payment completed successfully! Your invoice is settled in full. You can pick up your device anytime.');
+              fetchTicket(ticket.ticketNumber);
+            }
+          } catch (err: any) {
+            alert(err.response?.data?.message || 'Payment verification failed. Please contact counter support.');
+          }
+        },
+        (err) => {
+          alert(err.description || err.message || 'Payment cancelled or failed');
+        },
+        () => {
+          setPayingOnline(false);
+        }
+      );
+    } catch (err: any) {
+      alert(err.response?.data?.message || err.message || 'Error creating payment checkout');
+    } finally {
+      setPayingOnline(false);
     }
   };
 
@@ -391,6 +447,104 @@ export const PublicTrack: React.FC = () => {
             )}
           </div>
 
+          {/* ⭐ INVOICE & ONLINE SETTLEMENT CARD (RAZORPAY) */}
+          {ticket.invoiceId && (
+            <div
+              className="card"
+              style={{
+                padding: 20,
+                marginBottom: 16,
+                background: ticket.invoiceStatus === 'PAID'
+                  ? 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)'
+                  : 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)',
+                border: ticket.invoiceStatus === 'PAID'
+                  ? '1px solid #bbf7d0'
+                  : '1px solid #0071e3',
+                boxShadow: ticket.invoiceStatus !== 'PAID'
+                  ? '0 4px 14px rgba(0, 113, 227, 0.12)'
+                  : 'none',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CreditCard size={20} color={ticket.invoiceStatus === 'PAID' ? '#16a34a' : '#0071e3'} />
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                    Repair Tax Invoice #{ticket.invoiceNumber}
+                  </h3>
+                </div>
+                {ticket.invoiceStatus === 'PAID' ? (
+                  <span className="badge badge-success" style={{ fontSize: '0.74rem' }}>
+                    ✓ Invoice Paid in Full
+                  </span>
+                ) : (
+                  <span className="badge badge-warning" style={{ fontSize: '0.74rem' }}>
+                    Payment Due
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 14 }}>
+                <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Total Bill</div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: '#0f172a', marginTop: 2 }}>
+                    ₹{Number(ticket.invoiceTotal || 0).toFixed(2)}
+                  </div>
+                </div>
+                <div style={{ background: '#ffffff', padding: '10px 12px', borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b' }}>Remaining Balance Due</div>
+                  <div style={{ fontSize: '1.05rem', fontWeight: 800, color: (ticket.invoiceBalance || 0) > 0 ? '#b45309' : '#16a34a', marginTop: 2 }}>
+                    ₹{Number(ticket.invoiceBalance || 0).toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {(ticket.invoiceBalance || 0) > 0 ? (
+                <div>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={payingOnline}
+                    onClick={handleCustomerOnlinePayment}
+                    style={{
+                      width: '100%',
+                      background: 'linear-gradient(135deg, #0071e3 0%, #4f46e5 100%)',
+                      borderColor: 'transparent',
+                      fontWeight: 700,
+                      fontSize: '0.92rem',
+                      height: 44,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      borderRadius: 8,
+                      boxShadow: '0 4px 12px rgba(0, 113, 227, 0.25)',
+                    }}
+                  >
+                    {payingOnline ? (
+                      <>
+                        <Loader2 size={16} className="spin-fast" />
+                        <span>Opening Secure Payment Gateway...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard size={18} />
+                        <span>Pay ₹{Number(ticket.invoiceBalance).toFixed(2)} Online (UPI / GPay / Cards)</span>
+                      </>
+                    )}
+                  </button>
+                  <div style={{ textAlign: 'center', fontSize: '0.72rem', color: '#64748b', marginTop: 8 }}>
+                    🔒 Secured by Razorpay 256-bit encryption. UPI, Cards & NetBanking accepted.
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontSize: '0.84rem', color: '#15803d', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <CheckCircle2 size={16} color="#16a34a" />
+                  <span>No outstanding balance. Your device is ready for counter handover!</span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Support / Contact Footer */}
           <div style={{ textAlign: 'center', padding: '16px 0', fontSize: '0.82rem', color: '#64748b' }}>
             <div>Have questions about your repair? Contact our service desk:</div>
@@ -408,3 +562,4 @@ export const PublicTrack: React.FC = () => {
     </div>
   );
 };
+

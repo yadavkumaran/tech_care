@@ -71,6 +71,13 @@ public class RepairTicket {
     @Column(name = "estimated_completion_date")
     private LocalDateTime estimatedCompletionDate;
 
+    @Column(name = "last_reminder_sent_at")
+    private LocalDateTime lastReminderSentAt;
+
+    @Column(name = "reminder_count", nullable = false)
+    @Builder.Default
+    private Integer reminderCount = 0;
+
     @Column(name = "completed_at")
     private LocalDateTime completedAt;
 

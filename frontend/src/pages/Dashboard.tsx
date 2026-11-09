@@ -14,6 +14,7 @@ import {
   Users,
   AlertCircle,
   Package,
+  Flame,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { StatCard } from '../components/ui/StatCard';
@@ -173,12 +174,12 @@ export const Dashboard: React.FC = () => {
               />
 
               <StatCard
-                title="Awaiting Diagnostics"
-                value={stats?.myPendingDiagnosticsCount ?? (loading ? '—' : 0)}
-                icon={<Clock size={22} />}
-                iconBg="var(--status-warning-bg)"
-                iconColor="var(--status-warning-text)"
-                footnote="Diagnostic & parts queue"
+                title="Due Today (Last Date)"
+                value={stats?.dueTodayCount ?? (loading ? '—' : 0)}
+                icon={<Flame size={22} />}
+                iconBg="rgba(239, 68, 68, 0.12)"
+                iconColor="var(--status-danger)"
+                footnote="Promised completion today"
               />
 
               <StatCard
@@ -268,6 +269,46 @@ export const Dashboard: React.FC = () => {
             </>
           )}
         </div>
+
+        {/* SLA Due Today & Overdue Alert Banner */}
+        {((stats?.dueTodayCount || 0) > 0 || (stats?.overdueCount || 0) > 0) && (
+          <div
+            style={{
+              marginTop: 16,
+              marginBottom: 16,
+              padding: '12px 16px',
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              borderRadius: 12,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <Flame size={20} color="var(--status-danger)" style={{ flexShrink: 0 }} />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                  Target Date SLA Alert: {stats?.dueTodayCount || 0} repair job{(stats?.dueTodayCount || 0) !== 1 ? 's' : ''} promised for completion TODAY
+                  {(stats?.overdueCount || 0) > 0 ? ` & ${stats?.overdueCount} overdue` : ''}!
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  Prioritize these jobs before workbench closing so customer delivery commitments are honored.
+                </div>
+              </div>
+            </div>
+            <Link
+              to="/tickets?filter=DUE_TODAY"
+              className="btn btn-primary btn-sm"
+              style={{ fontSize: '0.78rem', height: 32, gap: 6 }}
+            >
+              <Flame size={14} />
+              <span>View Due Today ({stats?.dueTodayCount || 0}) →</span>
+            </Link>
+          </div>
+        )}
 
         {/* Section below KPIs: Technician Workbench Banner OR Financial Highlights */}
         {isTechnician ? (

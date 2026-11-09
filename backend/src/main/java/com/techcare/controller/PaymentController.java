@@ -1,13 +1,17 @@
 package com.techcare.controller;
 
 import com.techcare.dto.request.PaymentRequest;
+import com.techcare.dto.request.RazorpayOrderRequest;
+import com.techcare.dto.request.RazorpayVerifyRequest;
 import com.techcare.dto.response.ApiResponse;
+import com.techcare.dto.response.RazorpayOrderResponse;
 import com.techcare.entity.Payment;
 import com.techcare.exception.ResourceNotFoundException;
 import com.techcare.entity.User;
 import com.techcare.repository.UserRepository;
 import com.techcare.security.UserDetailsImpl;
 import com.techcare.service.PaymentService;
+import com.techcare.service.RazorpayService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,6 +28,7 @@ import java.util.List;
 public class PaymentController {
 
     private final PaymentService paymentService;
+    private final RazorpayService razorpayService;
     private final UserRepository userRepository;
 
     @GetMapping("/invoice/{invoiceId}")
@@ -42,6 +47,25 @@ public class PaymentController {
         Payment payment = paymentService.recordPayment(request, user);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Payment recorded successfully", payment));
+    }
+
+    @PostMapping("/razorpay/create-order")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
+    public ResponseEntity<ApiResponse<RazorpayOrderResponse>> createRazorpayOrder(
+            @Valid @RequestBody RazorpayOrderRequest request) {
+        RazorpayOrderResponse order = razorpayService.createOrder(request);
+        return ResponseEntity.ok(ApiResponse.success("Razorpay order created successfully", order));
+    }
+
+    @PostMapping("/razorpay/verify")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
+    public ResponseEntity<ApiResponse<Payment>> verifyRazorpayPayment(
+            @Valid @RequestBody RazorpayVerifyRequest request,
+            @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        User user = userRepository.findById(userDetails.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userDetails.getId()));
+        Payment payment = razorpayService.verifyAndRecordPayment(request, user);
+        return ResponseEntity.ok(ApiResponse.success("Payment verified and settled successfully via Razorpay", payment));
     }
 }
 

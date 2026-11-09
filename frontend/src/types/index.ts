@@ -87,6 +87,8 @@ export interface RepairTicket {
   estimatedCost: number;
   laborCharge: number;
   estimatedCompletionDate?: string;
+  lastReminderSentAt?: string;
+  reminderCount?: number;
   completedAt?: string;
   deliveredAt?: string;
   createdAt: string;
@@ -156,6 +158,8 @@ export interface DashboardStats {
   pendingApprovalCount: number;
   readyForDeliveryCount: number;
   lowStockCount: number;
+  dueTodayCount?: number;
+  overdueCount?: number;
   todayRevenue?: number;
   totalOutstandingDues?: number;
   recentTickets: RepairTicket[];

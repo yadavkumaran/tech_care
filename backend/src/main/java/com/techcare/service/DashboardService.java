@@ -43,11 +43,18 @@ public class DashboardService {
         long totalCustomers = customerRepository.count();
         long activeTechs = userRepository.findByRoleAndIsActiveTrue(Role.TECHNICIAN).size();
 
+        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
+        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
+        long dueToday = ticketRepository.countDueToday(startOfDay, endOfDay);
+        long overdue = ticketRepository.countOverdue(startOfDay);
+
         DashboardStatsResponse.DashboardStatsResponseBuilder builder = DashboardStatsResponse.builder()
                 .totalActiveRepairs(activeRepairs)
                 .pendingApprovalCount(pendingApproval)
                 .readyForDeliveryCount(readyForDelivery)
                 .lowStockCount(lowStockCount)
+                .dueTodayCount(dueToday)
+                .overdueCount(overdue)
                 .totalCustomersCount(totalCustomers)
                 .activeTechniciansCount(activeTechs);
 
@@ -58,6 +65,8 @@ public class DashboardService {
             long myCompleted = ticketRepository.countCompletedByTechnicianId(techId);
             long myPendingDiag = ticketRepository.countPendingDiagnosticsByTechnicianId(techId);
             long myHighPriority = ticketRepository.countHighPriorityByTechnicianId(techId);
+            long myDueToday = ticketRepository.countDueTodayByTechnicianId(techId, startOfDay, endOfDay);
+            long myOverdue = ticketRepository.countOverdueByTechnicianId(techId, startOfDay);
             List<RepairTicket> myTickets = ticketRepository.findRecentAssignedTickets(techId, PageRequest.of(0, 8));
 
             return builder
@@ -65,6 +74,8 @@ public class DashboardService {
                     .myCompletedCasesCount(myCompleted)
                     .myPendingDiagnosticsCount(myPendingDiag)
                     .myHighPriorityCount(myHighPriority)
+                    .dueTodayCount(myDueToday)
+                    .overdueCount(myOverdue)
                     .myAssignedTickets(myTickets)
                     .todayRevenue(null) // Hide financial revenue from technicians
                     .totalOutstandingDues(null)
@@ -73,8 +84,6 @@ public class DashboardService {
         }
 
         // For ADMIN and RECEPTIONIST: provide full business financial and recent operational queue
-        LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
-        LocalDateTime endOfDay = LocalDate.now().atTime(LocalTime.MAX);
         BigDecimal todayRevenue = paymentRepository.sumPaymentsBetween(startOfDay, endOfDay);
         BigDecimal totalOutstanding = invoiceRepository.calculateTotalOutstandingReceivables();
 

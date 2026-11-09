@@ -20,6 +20,10 @@ public class DashboardStatsResponse {
     private long readyForDeliveryCount;
     private long lowStockCount;
 
+    // Workbench SLA metrics
+    private long dueTodayCount;
+    private long overdueCount;
+
     private BigDecimal todayRevenue;
     private BigDecimal totalOutstandingDues;
 

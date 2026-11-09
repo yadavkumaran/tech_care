@@ -27,6 +27,7 @@ import { ApiResponse, Customer, Invoice, Payment, RepairTicket } from '../types'
 import { useToast } from '../context/ToastContext';
 import { useSync, useRealtimeSync } from '../context/SyncContext';
 import { LayoutContextType } from '../components/Layout';
+import { launchRazorpayCheckout, RazorpayOrderData } from '../utils/razorpay';
 
 export const Billing: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -54,6 +55,7 @@ export const Billing: React.FC = () => {
   // Button loading states
   const [isGeneratingInvoice, setIsGeneratingInvoice] = useState(false);
   const [isRecordingPayment, setIsRecordingPayment] = useState(false);
+  const [isPayingWithRazorpay, setIsPayingWithRazorpay] = useState(false);
 
   const { toast } = useToast();
   const { broadcastLocalUpdate } = useSync();
@@ -180,6 +182,59 @@ export const Billing: React.FC = () => {
       toast.error(err.response?.data?.message || 'Error recording payment');
     } finally {
       setIsRecordingPayment(false);
+    }
+  };
+
+  const handleRazorpayPayment = async () => {
+    if (!payingInvoice) return;
+    setIsPayingWithRazorpay(true);
+    try {
+      const orderRes = await api.post<ApiResponse<RazorpayOrderData>>('/payments/razorpay/create-order', {
+        invoiceId: payingInvoice.id,
+        amount: payAmount ? Number(payAmount) : undefined,
+      });
+
+      if (!orderRes.data.success || !orderRes.data.data) {
+        throw new Error(orderRes.data.message || 'Failed to initialize payment gateway');
+      }
+
+      const orderData = orderRes.data.data;
+
+      await launchRazorpayCheckout(
+        orderData,
+        async (paymentRes) => {
+          try {
+            const verifyRes = await api.post<ApiResponse<Payment>>('/payments/razorpay/verify', {
+              invoiceId: payingInvoice.id,
+              razorpayOrderId: paymentRes.razorpay_order_id,
+              razorpayPaymentId: paymentRes.razorpay_payment_id,
+              razorpaySignature: paymentRes.razorpay_signature,
+              paymentMethod: 'UPI',
+            });
+            if (verifyRes.data.success) {
+              toast.success('Payment verified & settled successfully via Razorpay!');
+              setPayingInvoice(null);
+              setPayAmount('');
+              setPayNotes('');
+              fetchData();
+              broadcastLocalUpdate('PAYMENT', 'RECORDED');
+              broadcastLocalUpdate('INVOICE', 'SETTLED');
+            }
+          } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Payment verification failed');
+          }
+        },
+        (err) => {
+          toast.error(err.description || err.message || 'Payment cancelled or failed');
+        },
+        () => {
+          setIsPayingWithRazorpay(false);
+        }
+      );
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Error starting Razorpay checkout');
+    } finally {
+      setIsPayingWithRazorpay(false);
     }
   };
 
@@ -685,6 +740,54 @@ export const Billing: React.FC = () => {
                 value={payNotes}
                 onChange={(e) => setPayNotes(e.target.value)}
               />
+            </div>
+
+            {/* Razorpay Online Checkout Option */}
+            <div
+              style={{
+                marginTop: 16,
+                padding: '14px',
+                background: 'linear-gradient(135deg, rgba(0, 113, 227, 0.08) 0%, rgba(99, 102, 241, 0.08) 100%)',
+                border: '1px solid rgba(0, 113, 227, 0.25)',
+                borderRadius: 10,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 10,
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0071e3', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <CreditCard size={16} />
+                  <span>Razorpay Instant Online Payment</span>
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                  Accept UPI (GPay/PhonePe), Credit/Debit Cards, QR Code, or NetBanking with instant verification.
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={isPayingWithRazorpay || !payAmount || Number(payAmount) <= 0}
+                onClick={handleRazorpayPayment}
+                style={{
+                  background: 'linear-gradient(135deg, #0071e3 0%, #4f46e5 100%)',
+                  borderColor: 'transparent',
+                  fontWeight: 600,
+                  fontSize: '0.80rem',
+                  padding: '6px 14px',
+                }}
+              >
+                {isPayingWithRazorpay ? (
+                  <>
+                    <Loader2 size={13} className="spin-fast" />
+                    <span>Opening Gateway...</span>
+                  </>
+                ) : (
+                  <span>Launch Razorpay Gateway →</span>
+                )}
+              </button>
             </div>
 
             <div className="modal-footer">
