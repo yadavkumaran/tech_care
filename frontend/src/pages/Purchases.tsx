@@ -299,16 +299,7 @@ export const Purchases: React.FC = () => {
       />
       <div className="page-body">
         {/* Navigation & Action Bar */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 16,
-            flexWrap: 'wrap',
-            gap: 10,
-          }}
-        >
+        <div className="page-control-bar">
           <div className="segmented-control">
             <button
               className={`segmented-btn ${activeTab === 'PURCHASES' ? 'active' : ''}`}
@@ -326,7 +317,7 @@ export const Purchases: React.FC = () => {
             </button>
           </div>
 
-          <div>
+          <div className="page-actions-group">
             {activeTab === 'PURCHASES' ? (
               <button className="btn btn-primary" onClick={() => setShowPurchaseModal(true)}>
                 <Plus size={16} />
@@ -354,8 +345,8 @@ export const Purchases: React.FC = () => {
                       <th>Vendor / Wholesaler</th>
                       <th>Vendor Bill #</th>
                       <th>Purchase Date</th>
-                      <th>Total Amount</th>
-                      <th>Paid Amount</th>
+                      <th style={{ textAlign: 'right' }}>Total Amount</th>
+                      <th style={{ textAlign: 'right' }}>Paid Amount</th>
                       <th>Payment Status</th>
                     </tr>
                   </thead>
@@ -379,13 +370,13 @@ export const Purchases: React.FC = () => {
                           <td style={{ color: 'var(--text-secondary)' }}>
                             {p.vendorBillNumber || 'N/A'}
                           </td>
-                          <td style={{ color: 'var(--text-secondary)', fontSize: '0.84rem' }}>
+                          <td style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
                             {p.purchaseDate}
                           </td>
-                          <td style={{ fontWeight: 600, color: 'var(--text-primary)' }} className="tabular">
+                          <td style={{ fontWeight: 600, color: 'var(--text-primary)', textAlign: 'right' }} className="tabular">
                             ₹{Number(p.totalAmount).toFixed(2)}
                           </td>
-                          <td style={{ color: '#059669', fontWeight: 600 }} className="tabular">
+                          <td style={{ color: '#059669', fontWeight: 600, textAlign: 'right' }} className="tabular">
                             ₹{Number(p.paidAmount).toFixed(2)}
                           </td>
                           <td>

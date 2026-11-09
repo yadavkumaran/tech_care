@@ -173,24 +173,17 @@ export const Staff: React.FC = () => {
       />
       <div className="page-body">
         {/* Top Control Bar */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 16,
-            flexWrap: 'wrap',
-            gap: 10,
-          }}
-        >
+        <div className="page-control-bar">
           <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
             Active team accounts: <b>{staffList.filter((s) => s.isActive).length}</b> of {staffList.length}
           </div>
 
-          <button className="btn btn-primary" onClick={openCreateModal}>
-            <Plus size={16} />
-            <span>Add Staff</span>
-          </button>
+          <div className="page-actions-group">
+            <button className="btn btn-primary" onClick={openCreateModal}>
+              <Plus size={16} />
+              <span>Add Staff</span>
+            </button>
+          </div>
         </div>
 
         {/* Desktop Table View */}

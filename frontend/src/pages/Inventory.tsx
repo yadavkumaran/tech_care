@@ -209,16 +209,7 @@ export const Inventory: React.FC = () => {
       />
       <div className="page-body">
         {/* Top Control Bar */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 16,
-            flexWrap: 'wrap',
-            gap: 10,
-          }}
-        >
+        <div className="page-control-bar">
           <SearchInput
             placeholder="Search parts by name, SKU, or category..."
             value={searchTerm}
@@ -226,7 +217,7 @@ export const Inventory: React.FC = () => {
             maxWidth={420}
           />
 
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div className="page-actions-group">
             <button
               className={`btn btn-sm ${showLowStockOnly ? 'btn-danger' : 'btn-outline'}`}
               onClick={() => setShowLowStockOnly(!showLowStockOnly)}

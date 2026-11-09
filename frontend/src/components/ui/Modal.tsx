@@ -58,7 +58,7 @@ export const Modal: React.FC<ModalProps> = ({
         <div className="sheet-drag-handle" />
 
         <div className="modal-header-row">
-          <div>
+          <div style={{ minWidth: 0, flex: 1, paddingRight: 12 }}>
             <h3 id="modal-title" className="modal-title">
               {title}
             </h3>

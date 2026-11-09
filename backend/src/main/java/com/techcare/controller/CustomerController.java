@@ -26,6 +26,12 @@ public class CustomerController {
         return ResponseEntity.ok(ApiResponse.success(customers));
     }
 
+    @GetMapping("/by-phone")
+    public ResponseEntity<ApiResponse<Customer>> getCustomerByPhone(@RequestParam String phone) {
+        Customer customer = customerService.getCustomerByPhone(phone);
+        return ResponseEntity.ok(ApiResponse.success(customer));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<Customer>> getCustomerById(@PathVariable Long id) {
         Customer customer = customerService.getCustomerById(id);

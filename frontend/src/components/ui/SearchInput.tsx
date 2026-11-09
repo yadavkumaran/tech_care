@@ -19,7 +19,7 @@ export const SearchInput: React.FC<SearchInputProps> = ({
   return (
     <div
       className={`search-input-wrapper ${className}`}
-      style={{ maxWidth }}
+      style={{ maxWidth, flex: 1 }}
     >
       <Search size={15} className="search-input-icon" />
       <input

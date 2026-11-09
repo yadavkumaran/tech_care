@@ -218,24 +218,17 @@ export const Billing: React.FC = () => {
         </div>
 
         {/* Action Header */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 16,
-            flexWrap: 'wrap',
-            gap: 10,
-          }}
-        >
+        <div className="page-control-bar">
           <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
             Official GST tax invoices generated for repairs & sales
           </div>
 
-          <button className="btn btn-primary" onClick={() => setShowInvoiceModal(true)}>
-            <Plus size={16} />
-            <span>New Invoice</span>
-          </button>
+          <div className="page-actions-group">
+            <button className="btn btn-primary" onClick={() => setShowInvoiceModal(true)}>
+              <Plus size={16} />
+              <span>New Invoice</span>
+            </button>
+          </div>
         </div>
 
         {/* Desktop Table View */}
@@ -247,11 +240,11 @@ export const Billing: React.FC = () => {
                   <th>Invoice #</th>
                   <th>Customer</th>
                   <th>Date</th>
-                  <th>Subtotal</th>
-                  <th>Tax</th>
-                  <th>Total</th>
-                  <th>Collected</th>
-                  <th>Balance Due</th>
+                  <th style={{ textAlign: 'right' }}>Subtotal</th>
+                  <th style={{ textAlign: 'right' }}>Tax</th>
+                  <th style={{ textAlign: 'right' }}>Total</th>
+                  <th style={{ textAlign: 'right' }}>Collected</th>
+                  <th style={{ textAlign: 'right' }}>Balance Due</th>
                   <th>Status</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
@@ -282,19 +275,19 @@ export const Billing: React.FC = () => {
                       <td style={{ color: 'var(--text-secondary)', fontSize: '0.82rem' }}>
                         {inv.invoiceDate}
                       </td>
-                      <td style={{ color: 'var(--text-secondary)' }} className="tabular">
+                      <td style={{ color: 'var(--text-secondary)', textAlign: 'right' }} className="tabular">
                         ₹{Number(inv.subtotal).toFixed(2)}
                       </td>
-                      <td style={{ color: 'var(--text-secondary)' }} className="tabular">
+                      <td style={{ color: 'var(--text-secondary)', textAlign: 'right' }} className="tabular">
                         ₹{Number(inv.taxAmount).toFixed(2)}
                       </td>
-                      <td style={{ fontWeight: 700, color: 'var(--text-primary)' }} className="tabular">
+                      <td style={{ fontWeight: 700, color: 'var(--text-primary)', textAlign: 'right' }} className="tabular">
                         ₹{Number(inv.totalAmount).toFixed(2)}
                       </td>
-                      <td style={{ color: '#059669', fontWeight: 600 }} className="tabular">
+                      <td style={{ color: '#059669', fontWeight: 600, textAlign: 'right' }} className="tabular">
                         ₹{Number(inv.paidAmount).toFixed(2)}
                       </td>
-                      <td>
+                      <td style={{ textAlign: 'right' }}>
                         <span
                           style={{
                             fontWeight: 600,

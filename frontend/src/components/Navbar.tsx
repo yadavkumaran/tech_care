@@ -39,18 +39,17 @@ export const Navbar: React.FC<NavbarProps> = ({
         {onOpenMobile && (
           <button
             type="button"
-            className="btn btn-ghost btn-icon"
+            className="btn btn-ghost btn-icon mobile-menu-toggle"
             onClick={onOpenMobile}
-            style={{ display: 'flex' }}
             aria-label="Open navigation menu"
           >
             <Menu size={18} />
           </button>
         )}
-        <div>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <div className="navbar-title">{title}</div>
           {subtitle && (
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', marginTop: -2 }}>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-tertiary)', marginTop: -2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               {subtitle}
             </div>
           )}
@@ -59,12 +58,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
       <div className="navbar-right">
         {actions}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
           <Badge variant={getRoleVariant(rawRole)}>
             <ShieldCheck size={12} style={{ marginRight: 2 }} />
             {rawRole}
           </Badge>
-          <div style={{ fontSize: '0.86rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+          <div className="navbar-user-name" style={{ fontSize: '0.86rem', fontWeight: 600, color: 'var(--text-primary)' }}>
             {user?.fullName}
           </div>
         </div>

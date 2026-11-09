@@ -30,6 +30,16 @@ public class CustomerService {
     }
 
     @Transactional(readOnly = true)
+    public Customer getCustomerByPhone(String phone) {
+        if (phone == null || phone.trim().isEmpty()) {
+            return null;
+        }
+        // Match exact phone or digits
+        String cleaned = phone.trim();
+        return customerRepository.findByPhone(cleaned).orElse(null);
+    }
+
+    @Transactional(readOnly = true)
     public Customer getCustomerById(Long id) {
         return customerRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer not found with id: " + id));

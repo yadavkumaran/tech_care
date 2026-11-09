@@ -23,6 +23,8 @@ import {
   Phone,
   User as UserIcon,
   Loader2,
+  UserPlus,
+  CheckCircle2,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { SearchInput } from '../components/ui/SearchInput';
@@ -63,11 +65,16 @@ export const Tickets: React.FC = () => {
   const [problemReported, setProblemReported] = useState('');
   const [priority, setPriority] = useState<TicketPriority>('MEDIUM');
 
-  // New Customer & Device quick form inside Intake modal
+  // Phone-First Customer Intake State
+  const [customerPhoneInput, setCustomerPhoneInput] = useState('');
+  const [phoneLookupStatus, setPhoneLookupStatus] = useState<'IDLE' | 'SEARCHING' | 'FOUND' | 'NEW'>('IDLE');
+  const [matchedCustomer, setMatchedCustomer] = useState<Customer | null>(null);
+  const [useManualSelect, setUseManualSelect] = useState(false);
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [isNewDeviceForExistingCustomer, setIsNewDeviceForExistingCustomer] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [newCustPhone, setNewCustPhone] = useState('');
+  const [newCustEmail, setNewCustEmail] = useState('');
   const [newDevBrand, setNewDevBrand] = useState('HP');
   const [newDevModel, setNewDevModel] = useState('');
   const [newDevSerial, setNewDevSerial] = useState('');
@@ -151,28 +158,110 @@ export const Tickets: React.FC = () => {
     }
   };
 
+  const loadCustomerDevices = async (customerId: number) => {
+    try {
+      const res = await api.get<ApiResponse<CustomerDevice[]>>(`/devices/customer/${customerId}`);
+      if (res.data.success) {
+        const fetched = res.data.data;
+        setDevices(fetched);
+        if (fetched.length > 0) {
+          setSelectedDeviceId(fetched[0].id);
+          setIsNewDeviceForExistingCustomer(false);
+        } else {
+          setSelectedDeviceId('');
+          setIsNewDeviceForExistingCustomer(true);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load customer devices', err);
+    }
+  };
+
+  const handlePhoneLookup = async (phone: string) => {
+    setCustomerPhoneInput(phone);
+    setNewCustPhone(phone);
+    const cleaned = phone.replace(/[\s\-\(\)\+]/g, '');
+
+    if (cleaned.length < 5) {
+      setPhoneLookupStatus('IDLE');
+      setMatchedCustomer(null);
+      setSelectedCustomerId('');
+      setDevices([]);
+      setIsNewCustomer(false);
+      setIsNewDeviceForExistingCustomer(false);
+      return;
+    }
+
+    // 1. Instant local search in loaded customers
+    const localMatch = customers.find((c) => {
+      const cClean = c.phone ? c.phone.replace(/[\s\-\(\)\+]/g, '') : '';
+      return (
+        cClean === cleaned ||
+        (cClean.length >= 10 && cleaned.length >= 10 && cClean.slice(-10) === cleaned.slice(-10))
+      );
+    });
+
+    if (localMatch) {
+      setMatchedCustomer(localMatch);
+      setPhoneLookupStatus('FOUND');
+      setIsNewCustomer(false);
+      setSelectedCustomerId(localMatch.id);
+      await loadCustomerDevices(localMatch.id);
+      return;
+    }
+
+    // 2. Server lookup if at least 7 digits
+    if (cleaned.length >= 7) {
+      setPhoneLookupStatus('SEARCHING');
+      try {
+        const res = await api.get<ApiResponse<Customer>>(`/customers/by-phone?phone=${encodeURIComponent(cleaned)}`);
+        if (res.data.success && res.data.data) {
+          const found = res.data.data;
+          setMatchedCustomer(found);
+          setPhoneLookupStatus('FOUND');
+          setIsNewCustomer(false);
+          setSelectedCustomerId(found.id);
+          setCustomers((prev) => (prev.some((c) => c.id === found.id) ? prev : [found, ...prev]));
+          await loadCustomerDevices(found.id);
+          return;
+        }
+      } catch (err) {
+        // Continue to check if considered new
+      }
+    }
+
+    // 3. If standard 10+ digits reached and not found -> New Customer
+    if (cleaned.length >= 10) {
+      setPhoneLookupStatus('NEW');
+      setMatchedCustomer(null);
+      setIsNewCustomer(true);
+      setSelectedCustomerId('');
+      setDevices([]);
+      setIsNewDeviceForExistingCustomer(false);
+    } else {
+      setPhoneLookupStatus('IDLE');
+      setMatchedCustomer(null);
+      setIsNewCustomer(false);
+    }
+  };
+
   const handleCustomerChange = async (customerId: number) => {
     setSelectedCustomerId(customerId);
     setSelectedDeviceId('');
     if (!customerId) {
       setDevices([]);
       setIsNewDeviceForExistingCustomer(false);
+      setMatchedCustomer(null);
       return;
     }
-    try {
-      const res = await api.get<ApiResponse<CustomerDevice[]>>(`/devices/customer/${customerId}`);
-      if (res.data.success) {
-        const fetched = res.data.data;
-        setDevices(fetched);
-        if (fetched.length === 0) {
-          setIsNewDeviceForExistingCustomer(true);
-        } else {
-          setIsNewDeviceForExistingCustomer(false);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load customer devices', err);
+    const found = customers.find((c) => c.id === customerId);
+    if (found) {
+      setMatchedCustomer(found);
+      setCustomerPhoneInput(found.phone);
+      setPhoneLookupStatus('FOUND');
+      setIsNewCustomer(false);
     }
+    await loadCustomerDevices(customerId);
   };
 
   const handleCreateTicket = async (e: React.FormEvent) => {
@@ -183,48 +272,74 @@ export const Tickets: React.FC = () => {
       let devId = selectedDeviceId;
 
       // Handle on-the-fly customer and device creation
-      if (isNewCustomer) {
+      if (isNewCustomer || phoneLookupStatus === 'NEW') {
+        const phoneToSave = (customerPhoneInput || newCustPhone).trim();
+        if (!newCustName.trim()) {
+          toast.warning('Please enter customer full name.');
+          setSubmittingIntake(false);
+          return;
+        }
+        if (!phoneToSave) {
+          toast.warning('Please enter customer phone number.');
+          setSubmittingIntake(false);
+          return;
+        }
+        if (!newDevBrand.trim() || !newDevModel.trim()) {
+          toast.warning('Please enter brand and model name for the device.');
+          setSubmittingIntake(false);
+          return;
+        }
+
         const custRes = await api.post<ApiResponse<Customer>>('/customers', {
-          fullName: newCustName,
-          phone: newCustPhone,
+          fullName: newCustName.trim(),
+          phone: phoneToSave,
+          email: newCustEmail.trim() || undefined,
         });
         custId = custRes.data.data.id;
 
         const devRes = await api.post<ApiResponse<CustomerDevice>>('/devices', {
           customerId: custId,
           deviceType: newDevType,
-          brand: newDevBrand,
-          modelName: newDevModel,
-          serialNumber: newDevSerial,
+          brand: newDevBrand.trim(),
+          modelName: newDevModel.trim(),
+          serialNumber: newDevSerial.trim() || undefined,
           devicePassword: newDevPassword || undefined,
           physicalCondition: newDevCondition || undefined,
           accessoriesReceived: newDevAccessories || undefined,
         });
         devId = devRes.data.data.id;
-      } else if (isNewDeviceForExistingCustomer || !selectedDeviceId) {
-        if (!newDevBrand.trim() || !newDevModel.trim()) {
-          toast.warning('Please enter brand and model name for the new device.');
+      } else {
+        // Existing customer
+        if (!custId) {
+          toast.warning('Please enter or select a valid customer.');
           setSubmittingIntake(false);
           return;
         }
-        const devRes = await api.post<ApiResponse<CustomerDevice>>('/devices', {
-          customerId: custId,
-          deviceType: newDevType,
-          brand: newDevBrand,
-          modelName: newDevModel,
-          serialNumber: newDevSerial,
-          devicePassword: newDevPassword || undefined,
-          physicalCondition: newDevCondition || undefined,
-          accessoriesReceived: newDevAccessories || undefined,
-        });
-        devId = devRes.data.data.id;
+        if (isNewDeviceForExistingCustomer || !devId) {
+          if (!newDevBrand.trim() || !newDevModel.trim()) {
+            toast.warning('Please enter brand and model name for the new device.');
+            setSubmittingIntake(false);
+            return;
+          }
+          const devRes = await api.post<ApiResponse<CustomerDevice>>('/devices', {
+            customerId: custId,
+            deviceType: newDevType,
+            brand: newDevBrand.trim(),
+            modelName: newDevModel.trim(),
+            serialNumber: newDevSerial.trim() || undefined,
+            devicePassword: newDevPassword || undefined,
+            physicalCondition: newDevCondition || undefined,
+            accessoriesReceived: newDevAccessories || undefined,
+          });
+          devId = devRes.data.data.id;
+        }
       }
 
       await api.post('/tickets', {
         customerId: custId,
         deviceId: devId,
         assignedTechnicianId: selectedTechId || null,
-        problemReported,
+        problemReported: problemReported.trim(),
         priority,
       });
 
@@ -241,6 +356,10 @@ export const Tickets: React.FC = () => {
   };
 
   const resetIntakeForm = () => {
+    setCustomerPhoneInput('');
+    setPhoneLookupStatus('IDLE');
+    setMatchedCustomer(null);
+    setUseManualSelect(false);
     setSelectedCustomerId('');
     setSelectedDeviceId('');
     setSelectedTechId('');
@@ -249,6 +368,7 @@ export const Tickets: React.FC = () => {
     setIsNewDeviceForExistingCustomer(false);
     setNewCustName('');
     setNewCustPhone('');
+    setNewCustEmail('');
     setNewDevBrand('HP');
     setNewDevModel('');
     setNewDevSerial('');
@@ -257,6 +377,7 @@ export const Tickets: React.FC = () => {
     setNewDevCondition('');
     setNewDevAccessories('');
     setPriority('MEDIUM');
+    setDevices([]);
   };
 
   const openTicketDetails = async (ticket: RepairTicket) => {
@@ -519,16 +640,7 @@ export const Tickets: React.FC = () => {
       />
       <div className="page-body">
         {/* Top Control Bar */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 14,
-            flexWrap: 'wrap',
-            gap: 10,
-          }}
-        >
+        <div className="page-control-bar">
           <SearchInput
             placeholder="Search ticket #, customer, phone, or model..."
             value={searchTerm}
@@ -537,16 +649,18 @@ export const Tickets: React.FC = () => {
           />
 
           {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) && (
-            <button
-              className="btn btn-primary"
-              onClick={() => {
-                loadTechsAndInventory();
-                setShowIntakeModal(true);
-              }}
-            >
-              <Plus size={16} />
-              <span>New Intake</span>
-            </button>
+            <div className="page-actions-group">
+              <button
+                className="btn btn-primary"
+                onClick={() => {
+                  loadTechsAndInventory();
+                  setShowIntakeModal(true);
+                }}
+              >
+                <Plus size={16} />
+                <span>New Intake</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -795,41 +909,143 @@ export const Tickets: React.FC = () => {
         maxWidth={660}
       >
         <form onSubmit={handleCreateTicket}>
-          {/* Customer Selection Tabs */}
-          <div style={{ marginBottom: 18 }}>
-            <div className="segmented-control" style={{ width: '100%' }}>
+          {/* 1. PHONE-FIRST CUSTOMER IDENTIFICATION */}
+          <div className="modal-section-card" style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <label className="form-label" style={{ marginBottom: 0, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Phone size={15} color="var(--primary)" />
+                <span>Customer Mobile Number <span className="required-mark">*</span></span>
+              </label>
               <button
                 type="button"
-                className={`segmented-btn ${!isNewCustomer ? 'active' : ''}`}
-                style={{ flex: 1, justifyContent: 'center' }}
-                onClick={() => setIsNewCustomer(false)}
+                className="btn btn-ghost btn-xs"
+                style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}
+                onClick={() => {
+                  setUseManualSelect(!useManualSelect);
+                  if (useManualSelect) resetIntakeForm();
+                }}
               >
-                Existing Customer
-              </button>
-              <button
-                type="button"
-                className={`segmented-btn ${isNewCustomer ? 'active' : ''}`}
-                style={{ flex: 1, justifyContent: 'center' }}
-                onClick={() => setIsNewCustomer(true)}
-              >
-                + Register New
+                {useManualSelect ? '← Enter Phone Number' : 'Or select by customer name →'}
               </button>
             </div>
-          </div>
 
-          {!isNewCustomer ? (
-            <div className="modal-section-card">
-              <div className="form-group">
-                <label className="form-label">
-                  Select Customer <span className="required-mark">*</span>
-                </label>
+            {!useManualSelect ? (
+              <div>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    className="form-control"
+                    style={{ height: 44, fontSize: '0.98rem', fontWeight: 600, paddingLeft: 40, letterSpacing: '0.5px' }}
+                    placeholder="Enter 10-digit mobile number (e.g. 9876543210)..."
+                    value={customerPhoneInput}
+                    onChange={(e) => handlePhoneLookup(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                  <Phone
+                    size={17}
+                    style={{ position: 'absolute', left: 13, top: 14, color: 'var(--text-muted)', pointerEvents: 'none' }}
+                  />
+                  {phoneLookupStatus === 'SEARCHING' && (
+                    <Loader2
+                      size={17}
+                      className="spin-fast"
+                      style={{ position: 'absolute', right: 14, top: 14, color: 'var(--primary)' }}
+                    />
+                  )}
+                </div>
+
+                {/* Case A: Existing Customer Verified */}
+                {phoneLookupStatus === 'FOUND' && matchedCustomer && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: '10px 14px',
+                      background: 'var(--status-success-bg, #f0fdf4)',
+                      border: '1px solid var(--status-success-border, #bbf7d0)',
+                      borderRadius: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <CheckCircle2 size={20} color="var(--status-success-text, #16a34a)" />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.90rem', color: 'var(--status-success-text, #15803d)' }}>
+                          Existing Customer: {matchedCustomer.fullName}
+                        </div>
+                        <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                          Phone: <strong>{matchedCustomer.phone}</strong> {matchedCustomer.email ? `• ${matchedCustomer.email}` : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="badge badge-success" style={{ fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                      Registered
+                    </span>
+                  </div>
+                )}
+
+                {/* Case B: New Customer Intake Form */}
+                {phoneLookupStatus === 'NEW' && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: '12px 14px',
+                      background: 'var(--status-info-bg, #eff6ff)',
+                      border: '1px solid var(--status-info-border, #bfdbfe)',
+                      borderRadius: 8,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                      <UserPlus size={18} color="var(--primary)" />
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--primary)' }}>
+                          New Customer (First Visit)
+                        </div>
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                          Number not found in database. Enter name below to register their profile.
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Customer Full Name <span className="required-mark">*</span></label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          required
+                          value={newCustName}
+                          onChange={(e) => setNewCustName(e.target.value)}
+                          placeholder="e.g. Ramesh Patel"
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label">Email Address (Optional)</label>
+                        <input
+                          type="email"
+                          className="form-control"
+                          value={newCustEmail}
+                          onChange={(e) => setNewCustEmail(e.target.value)}
+                          placeholder="ramesh@example.com"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Fallback Dropdown for manual name selection */
+              <div className="form-group" style={{ marginBottom: 0 }}>
                 <select
                   className="form-control"
                   value={selectedCustomerId}
                   onChange={(e) => handleCustomerChange(Number(e.target.value))}
                   required
                 >
-                  <option value="">-- Choose registered customer --</option>
+                  <option value="">-- Choose registered customer by name --</option>
                   {customers.map((c) => (
                     <option key={c.id} value={c.id}>
                       {c.fullName} ({c.phone})
@@ -837,229 +1053,144 @@ export const Tickets: React.FC = () => {
                   ))}
                 </select>
               </div>
+            )}
+          </div>
 
-              {selectedCustomerId && (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 12 }}>
-                    <label className="form-label" style={{ marginBottom: 0 }}>
-                      Device Equipment <span className="required-mark">*</span>
-                    </label>
+          {/* 2. DEVICE EQUIPMENT SECTION */}
+          <div className="modal-section-card" style={{ marginBottom: 16 }}>
+            {selectedCustomerId && !isNewCustomer && devices.length > 0 && !isNewDeviceForExistingCustomer ? (
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label className="form-label" style={{ marginBottom: 0, fontWeight: 700 }}>
+                    Select Customer's Equipment <span className="required-mark">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    style={{ color: 'var(--primary)', fontWeight: 600, padding: '2px 8px', fontSize: '0.80rem' }}
+                    onClick={() => {
+                      setIsNewDeviceForExistingCustomer(true);
+                      setSelectedDeviceId('');
+                    }}
+                  >
+                    + Brought a Different Device
+                  </button>
+                </div>
+                <select
+                  className="form-control"
+                  value={selectedDeviceId}
+                  onChange={(e) => setSelectedDeviceId(Number(e.target.value))}
+                  required
+                >
+                  {devices.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.brand} {d.modelName} ({d.deviceType}) — SN: {d.serialNumber || 'N/A'}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Device Equipment Details <span className="required-mark">*</span>
+                  </div>
+                  {selectedCustomerId && devices.length > 0 && (
                     <button
                       type="button"
-                      className="btn btn-ghost btn-sm"
-                      style={{ color: 'var(--primary)', fontWeight: 600, padding: '2px 8px', fontSize: '0.82rem' }}
+                      className="btn btn-ghost btn-xs"
+                      style={{ color: 'var(--primary)', fontWeight: 600 }}
                       onClick={() => {
-                        setIsNewDeviceForExistingCustomer(!isNewDeviceForExistingCustomer);
-                        if (!isNewDeviceForExistingCustomer) {
-                          setSelectedDeviceId('');
-                        }
+                        setIsNewDeviceForExistingCustomer(false);
+                        setSelectedDeviceId(devices[0]?.id || '');
                       }}
                     >
-                      {isNewDeviceForExistingCustomer ? '← Choose Existing Device' : '+ Register New Device'}
+                      ← Select From Previous Devices
                     </button>
-                  </div>
-
-                  {!isNewDeviceForExistingCustomer ? (
-                    <div className="form-group" style={{ marginBottom: 0 }}>
-                      <select
-                        className="form-control"
-                        value={selectedDeviceId}
-                        onChange={(e) => setSelectedDeviceId(Number(e.target.value))}
-                        required={!isNewDeviceForExistingCustomer}
-                      >
-                        <option value="">
-                          {devices.length > 0 ? '-- Choose registered device --' : '-- No devices found for this customer --'}
-                        </option>
-                        {devices.map((d) => (
-                          <option key={d.id} value={d.id}>
-                            {d.brand} {d.modelName} ({d.deviceType}) — SN: {d.serialNumber || 'N/A'}
-                          </option>
-                        ))}
-                      </select>
-                      {devices.length === 0 && (
-                        <div style={{ fontSize: '0.78rem', color: 'var(--status-warning-text)', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--status-warning-bg)', padding: '6px 10px', borderRadius: 6 }}>
-                          <span>No registered devices found for this customer.</span>
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            style={{ padding: '2px 10px', fontSize: '0.76rem' }}
-                            onClick={() => setIsNewDeviceForExistingCustomer(true)}
-                          >
-                            + Register Device Now
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ background: 'var(--bg-surface-subtle)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)' }}>
-                      <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
-                        Register New Hardware for this Customer:
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
-                        <div className="form-group">
-                          <label className="form-label">Device Type <span className="required-mark">*</span></label>
-                          <select
-                            className="form-control"
-                            value={newDevType}
-                            onChange={(e) => setNewDevType(e.target.value)}
-                          >
-                            <option value="LAPTOP">Laptop</option>
-                            <option value="DESKTOP">Desktop</option>
-                            <option value="ALL_IN_ONE">All-in-One PC</option>
-                            <option value="PRINTER">Printer / Peripheral</option>
-                            <option value="CUSTOM_PC">Custom PC / Workstation</option>
-                          </select>
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Brand <span className="required-mark">*</span></label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            required={isNewDeviceForExistingCustomer}
-                            value={newDevBrand}
-                            onChange={(e) => setNewDevBrand(e.target.value)}
-                            placeholder="Apple, Dell, HP, Lenovo"
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Model Name <span className="required-mark">*</span></label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            required={isNewDeviceForExistingCustomer}
-                            value={newDevModel}
-                            onChange={(e) => setNewDevModel(e.target.value)}
-                            placeholder="e.g. ThinkPad T14 / MacBook Pro"
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Serial Number</label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            value={newDevSerial}
-                            onChange={(e) => setNewDevSerial(e.target.value)}
-                            placeholder="S/N or Service Tag"
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Device PIN / Unlock Pattern</label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            value={newDevPassword}
-                            onChange={(e) => setNewDevPassword(e.target.value)}
-                            placeholder="PIN or Password"
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Physical Condition</label>
-                          <input
-                            type="text"
-                            className="form-control"
-                            value={newDevCondition}
-                            onChange={(e) => setNewDevCondition(e.target.value)}
-                            placeholder="Scratches, dents, cracks..."
-                          />
-                        </div>
-                      </div>
-                      <div className="form-group" style={{ marginBottom: 0 }}>
-                        <label className="form-label">Accessories Left with Device</label>
-                        <input
-                          type="text"
-                          className="form-control"
-                          value={newDevAccessories}
-                          onChange={(e) => setNewDevAccessories(e.target.value)}
-                          placeholder="e.g. Charger, Power Cable, Laptop Bag"
-                        />
-                      </div>
-                    </div>
                   )}
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="modal-section-card">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 10 }}>
-                <div className="form-group">
-                  <label className="form-label">
-                    Customer Full Name <span className="required-mark">*</span>
-                  </label>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+                  <div className="form-group">
+                    <label className="form-label">Device Type <span className="required-mark">*</span></label>
+                    <select
+                      className="form-control"
+                      value={newDevType}
+                      onChange={(e) => setNewDevType(e.target.value)}
+                    >
+                      <option value="LAPTOP">Laptop</option>
+                      <option value="DESKTOP">Desktop</option>
+                      <option value="ALL_IN_ONE">All-in-One PC</option>
+                      <option value="PRINTER">Printer / Peripheral</option>
+                      <option value="CUSTOM_PC">Custom PC / Workstation</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Brand <span className="required-mark">*</span></label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      required
+                      value={newDevBrand}
+                      onChange={(e) => setNewDevBrand(e.target.value)}
+                      placeholder="Apple, Dell, HP, Lenovo"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Model Name <span className="required-mark">*</span></label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      required
+                      value={newDevModel}
+                      onChange={(e) => setNewDevModel(e.target.value)}
+                      placeholder="e.g. MacBook Pro M1 / ThinkPad T14"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Serial Number</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={newDevSerial}
+                      onChange={(e) => setNewDevSerial(e.target.value)}
+                      placeholder="Hardware S/N or Service Tag"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Device PIN / Unlock Passcode</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={newDevPassword}
+                      onChange={(e) => setNewDevPassword(e.target.value)}
+                      placeholder="PIN or Password"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Physical Condition</label>
+                    <input
+                      type="text"
+                      className="form-control"
+                      value={newDevCondition}
+                      onChange={(e) => setNewDevCondition(e.target.value)}
+                      placeholder="Scratches, minor dent, screen intact..."
+                    />
+                  </div>
+                </div>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label">Accessories Left with Device</label>
                   <input
                     type="text"
                     className="form-control"
-                    required
-                    value={newCustName}
-                    onChange={(e) => setNewCustName(e.target.value)}
-                    placeholder="e.g. Priya Sundaram"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">
-                    Phone Number <span className="required-mark">*</span>
-                  </label>
-                  <input
-                    type="tel"
-                    inputMode="tel"
-                    className="form-control"
-                    required
-                    value={newCustPhone}
-                    onChange={(e) => setNewCustPhone(e.target.value)}
-                    placeholder="+91 9876543210"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Device Type</label>
-                  <select
-                    className="form-control"
-                    value={newDevType}
-                    onChange={(e) => setNewDevType(e.target.value)}
-                  >
-                    <option value="LAPTOP">Laptop</option>
-                    <option value="DESKTOP">Desktop</option>
-                    <option value="ALL_IN_ONE">All-in-One PC</option>
-                    <option value="CUSTOM_PC">Custom PC / Workstation</option>
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">
-                    Brand <span className="required-mark">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    required
-                    value={newDevBrand}
-                    onChange={(e) => setNewDevBrand(e.target.value)}
-                    placeholder="Apple, Dell, HP, Lenovo"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">
-                    Model Name <span className="required-mark">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    required
-                    value={newDevModel}
-                    onChange={(e) => setNewDevModel(e.target.value)}
-                    placeholder="e.g. MacBook Pro M1"
-                  />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Serial Number</label>
-                  <input
-                    type="text"
-                    className="form-control"
-                    value={newDevSerial}
-                    onChange={(e) => setNewDevSerial(e.target.value)}
-                    placeholder="Hardware SN / Tag"
+                    value={newDevAccessories}
+                    onChange={(e) => setNewDevAccessories(e.target.value)}
+                    placeholder="e.g. Original Charger, Power Adapter, Laptop Sleeve"
                   />
                 </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           <div className="form-group">
             <label className="form-label">
@@ -1216,7 +1347,7 @@ export const Tickets: React.FC = () => {
                   : 'No transitions available for your role at this stage.'}
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8, alignItems: 'center' }}>
+              <div className="modal-form-grid-3">
                 <select
                   className="form-control"
                   value={newStatus}
@@ -1240,7 +1371,7 @@ export const Tickets: React.FC = () => {
                   className="btn btn-primary btn-sm"
                   disabled={!newStatus || submittingStatus}
                   onClick={handleStatusTransition}
-                  style={{ height: 36 }}
+                  style={{ height: 38 }}
                 >
                   {submittingStatus ? (
                     <>
@@ -1319,7 +1450,7 @@ export const Tickets: React.FC = () => {
                     onChange={(e) => setDiagNotes(e.target.value)}
                   />
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, alignItems: 'end' }}>
+                <div className="modal-form-grid-3">
                   <div className="form-group" style={{ margin: 0 }}>
                     <label className="form-label">Estimated Total (₹)</label>
                     <input
@@ -1346,7 +1477,7 @@ export const Tickets: React.FC = () => {
                     className="btn btn-outline"
                     disabled={savingDiagnosis}
                     onClick={handleUpdateDiagnosis}
-                    style={{ height: 36 }}
+                    style={{ height: 38 }}
                   >
                     {savingDiagnosis ? (
                       <>
@@ -1377,8 +1508,8 @@ export const Tickets: React.FC = () => {
                 Parts consumption is reserved for the assigned technician ({activeTicket.assignedTechnician?.fullName || 'unassigned'}) or administrator.
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8, alignItems: 'end' }}>
-                <div style={{ gridColumn: 'span 2' }}>
+              <div className="modal-form-grid-parts">
+                <div>
                   <select
                     className="form-control"
                     value={selectedPartId}
@@ -1406,7 +1537,7 @@ export const Tickets: React.FC = () => {
                   className="btn btn-outline"
                   disabled={!selectedPartId || consumingPart}
                   onClick={handleConsumePart}
-                  style={{ height: 36 }}
+                  style={{ height: 38 }}
                 >
                   {consumingPart ? (
                     <>

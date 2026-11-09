@@ -246,17 +246,8 @@ export const Customers: React.FC = () => {
       />
       <div className="page-body">
         {/* Top Control Bar */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: 16,
-            flexWrap: 'wrap',
-            gap: 10,
-          }}
-        >
-          <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, flex: 1, maxWidth: 440 }}>
+        <div className="page-control-bar">
+          <form onSubmit={handleSearch} style={{ display: 'flex', flex: 1, maxWidth: 440 }}>
             <SearchInput
               placeholder="Search by customer name or phone..."
               value={searchTerm}
@@ -266,16 +257,15 @@ export const Customers: React.FC = () => {
               }}
               maxWidth="100%"
             />
-            <button type="submit" className="btn btn-outline">
-              <Search size={15} />
-            </button>
           </form>
 
           {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) && (
-            <button className="btn btn-primary" onClick={openCreateModal}>
-              <Plus size={16} />
-              <span>New Customer</span>
-            </button>
+            <div className="page-actions-group">
+              <button className="btn btn-primary" onClick={openCreateModal}>
+                <Plus size={16} />
+                <span>New Customer</span>
+              </button>
+            </div>
           )}
         </div>
 
