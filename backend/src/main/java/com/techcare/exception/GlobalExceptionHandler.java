@@ -94,9 +94,29 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(org.springframework.dao.DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Object>> handleDataIntegrityViolation(org.springframework.dao.DataIntegrityViolationException ex) {
+        String detail = ex.getMostSpecificCause() != null ? ex.getMostSpecificCause().getMessage() : ex.getMessage();
+        String message = "A record with this identifier or unique attribute already exists.";
+        if (detail != null) {
+            String lower = detail.toLowerCase();
+            if (lower.contains("ticket_number")) {
+                message = "A repair ticket with this ticket number already exists. Please retry generating the job sheet.";
+            } else if (lower.contains("phone")) {
+                message = "A customer with this phone number is already registered in the system.";
+            } else if (lower.contains("email")) {
+                message = "A user or customer with this email address already exists.";
+            } else if (lower.contains("username")) {
+                message = "A staff member with this username already exists.";
+            } else if (lower.contains("sku") || lower.contains("part_number")) {
+                message = "An inventory item with this SKU or part number already exists.";
+            } else if (lower.contains("invoice_number")) {
+                message = "An invoice with this invoice number already exists.";
+            } else if (lower.contains("serial_number")) {
+                message = "A device with this serial number is already registered.";
+            }
+        }
         return ResponseEntity
                 .status(HttpStatus.CONFLICT)
-                .body(ApiResponse.error("A record with this identifier or unique attribute already exists."));
+                .body(ApiResponse.error(message));
     }
 
     @ExceptionHandler(Exception.class)

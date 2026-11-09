@@ -68,5 +68,8 @@ public interface RepairTicketRepository extends JpaRepository<RepairTicket, Long
 
     @Query("SELECT COUNT(t) FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED') AND t.estimatedCompletionDate < :startOfDay")
     long countOverdueByTechnicianId(@Param("techId") Long techId, @Param("startOfDay") java.time.LocalDateTime startOfDay);
+
+    @Query("SELECT t.ticketNumber FROM RepairTicket t WHERE t.ticketNumber LIKE CONCAT('TC-', :year, '-%') ORDER BY t.id DESC")
+    List<String> findTicketNumbersByYear(@Param("year") int year, org.springframework.data.domain.Pageable pageable);
 }
 

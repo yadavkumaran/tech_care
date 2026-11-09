@@ -425,12 +425,30 @@ export const Tickets: React.FC = () => {
           return;
         }
 
-        const custRes = await api.post<ApiResponse<Customer>>('/customers', {
-          fullName: newCustName.trim(),
-          phone: phoneToSave,
-          email: newCustEmail.trim() || undefined,
-        });
-        custId = custRes.data.data.id;
+        let custId = selectedCustomerId;
+        let devId = selectedDeviceId;
+
+        try {
+          const custRes = await api.post<ApiResponse<Customer>>('/customers', {
+            fullName: newCustName.trim(),
+            phone: phoneToSave,
+            email: newCustEmail.trim() || undefined,
+          });
+          custId = custRes.data.data.id;
+        } catch (custErr: any) {
+          // If customer already exists with this phone, auto-link their existing profile seamlessly
+          try {
+            const existingRes = await api.get<ApiResponse<Customer>>(`/customers/by-phone?phone=${encodeURIComponent(phoneToSave)}`);
+            if (existingRes.data.success && existingRes.data.data) {
+              custId = existingRes.data.data.id;
+              toast.info(`Linked intake ticket to registered customer: ${existingRes.data.data.fullName}`);
+            } else {
+              throw custErr;
+            }
+          } catch {
+            throw custErr;
+          }
+        }
 
         const devRes = await api.post<ApiResponse<CustomerDevice>>('/devices', {
           customerId: custId,

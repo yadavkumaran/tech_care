@@ -34,9 +34,20 @@ public class CustomerService {
         if (phone == null || phone.trim().isEmpty()) {
             return null;
         }
-        // Match exact phone or digits
         String cleaned = phone.trim();
-        return customerRepository.findByPhone(cleaned).orElse(null);
+        java.util.Optional<Customer> exact = customerRepository.findByPhone(cleaned);
+        if (exact.isPresent()) {
+            return exact.get();
+        }
+        String digits = cleaned.replaceAll("\\D", "");
+        if (digits.length() >= 10) {
+            String suffix = digits.substring(digits.length() - 10);
+            return customerRepository.findAll().stream()
+                    .filter(c -> c.getPhone() != null && c.getPhone().replaceAll("\\D", "").endsWith(suffix))
+                    .findFirst()
+                    .orElse(null);
+        }
+        return null;
     }
 
     @Transactional(readOnly = true)

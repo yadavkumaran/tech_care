@@ -113,6 +113,33 @@ public class RepairTicketService {
                 .orElseThrow(() -> new ResourceNotFoundException("Repair ticket not found with number: " + ticketNumber));
     }
 
+    public synchronized String generateNextTicketNumber() {
+        int currentYear = Year.now().getValue();
+        List<String> latestList = ticketRepository.findTicketNumbersByYear(currentYear, org.springframework.data.domain.PageRequest.of(0, 10));
+        int maxSeq = 0;
+        for (String num : latestList) {
+            try {
+                String[] parts = num.split("-");
+                if (parts.length >= 3) {
+                    int seq = Integer.parseInt(parts[2]);
+                    if (seq > maxSeq) {
+                        maxSeq = seq;
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+        if (maxSeq == 0) {
+            maxSeq = (int) ticketRepository.count();
+        }
+        int nextSeq = maxSeq + 1;
+        String candidate = String.format("TC-%d-%04d", currentYear, nextSeq);
+        while (ticketRepository.existsByTicketNumber(candidate)) {
+            nextSeq++;
+            candidate = String.format("TC-%d-%04d", currentYear, nextSeq);
+        }
+        return candidate;
+    }
+
     @Transactional
     public RepairTicket createIntakeTicket(TicketIntakeRequest request, User currentUser) {
         Customer customer = customerService.getCustomerById(request.getCustomerId());
@@ -129,11 +156,7 @@ public class RepairTicketService {
         }
 
         // Generate unique ticket number: TC-2026-0001
-        long count = ticketRepository.count() + 1;
-        String ticketNumber = String.format("TC-%d-%04d", Year.now().getValue(), count);
-        if (ticketRepository.existsByTicketNumber(ticketNumber)) {
-            ticketNumber = String.format("TC-%d-%04d-%s", Year.now().getValue(), count, UUID.randomUUID().toString().substring(0, 4).toUpperCase());
-        }
+        String ticketNumber = generateNextTicketNumber();
 
         TicketPriority priority = TicketPriority.MEDIUM;
         if (request.getPriority() != null) {
