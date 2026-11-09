@@ -444,4 +444,43 @@ public class RepairTicketService {
         ticket.setStatus(TicketStatus.CANCELLED);
         ticketRepository.save(ticket);
     }
+
+    @Transactional
+    public RepairTicket customerApproveQuote(String ticketNumber) {
+        RepairTicket ticket = getTicketByNumber(ticketNumber);
+        if (ticket.getStatus() == TicketStatus.DELIVERED || ticket.getStatus() == TicketStatus.CANCELLED) {
+            throw new BadRequestException("Quote cannot be approved in current status: " + ticket.getStatus());
+        }
+        ticket.setStatus(TicketStatus.APPROVED);
+        RepairTicket updated = ticketRepository.save(ticket);
+
+        RepairTicketLog log = RepairTicketLog.builder()
+                .ticket(updated)
+                .previousStatus(TicketStatus.ESTIMATION_PENDING.name())
+                .newStatus(TicketStatus.APPROVED.name())
+                .remarks("Customer approved estimated repair quotation (₹" + updated.getEstimatedCost() + ") via tracking portal")
+                .build();
+        ticketLogRepository.save(log);
+
+        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), "Customer");
+        return updated;
+    }
+
+    @Transactional
+    public RepairTicket customerRejectQuote(String ticketNumber) {
+        RepairTicket ticket = getTicketByNumber(ticketNumber);
+        ticket.setStatus(TicketStatus.REJECTED);
+        RepairTicket updated = ticketRepository.save(ticket);
+
+        RepairTicketLog log = RepairTicketLog.builder()
+                .ticket(updated)
+                .previousStatus(ticket.getStatus().name())
+                .newStatus(TicketStatus.REJECTED.name())
+                .remarks("Customer declined estimated quotation via tracking portal")
+                .build();
+        ticketLogRepository.save(log);
+
+        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), "Customer");
+        return updated;
+    }
 }

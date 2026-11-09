@@ -5,6 +5,7 @@ import { ToastProvider } from './context/ToastContext';
 import { SyncProvider } from './context/SyncContext';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
+import { PublicTrack } from './pages/PublicTrack';
 import { Dashboard } from './pages/Dashboard';
 import { Tickets } from './pages/Tickets';
 import { Customers } from './pages/Customers';
@@ -48,6 +49,8 @@ export const App: React.FC = () => {
           <BrowserRouter>
             <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/track" element={<PublicTrack />} />
+            <Route path="/track/:ticketNumber" element={<PublicTrack />} />
 
           <Route
             path="/"

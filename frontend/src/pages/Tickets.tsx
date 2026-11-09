@@ -25,6 +25,9 @@ import {
   Loader2,
   UserPlus,
   CheckCircle2,
+  ReceiptText,
+  Printer,
+  MessageCircle,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { SearchInput } from '../components/ui/SearchInput';
@@ -37,6 +40,7 @@ import {
   Customer,
   CustomerDevice,
   InventoryItem,
+  Invoice,
   RepairTicket,
   TicketLog,
   TicketStatus,
@@ -50,6 +54,7 @@ import { LayoutContextType } from '../components/Layout';
 
 export const Tickets: React.FC = () => {
   const [tickets, setTickets] = useState<RepairTicket[]>([]);
+  const [invoicedTicketIds, setInvoicedTicketIds] = useState<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('ONGOING');
@@ -89,6 +94,8 @@ export const Tickets: React.FC = () => {
   const [ticketLogs, setTicketLogs] = useState<TicketLog[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [showActionModal, setShowActionModal] = useState(false);
+  const [showQuotationModal, setShowQuotationModal] = useState(false);
+  const [quotationTicket, setQuotationTicket] = useState<RepairTicket | null>(null);
 
   // Diagnosis inputs
   const [diagNotes, setDiagNotes] = useState('');
@@ -155,20 +162,30 @@ export const Tickets: React.FC = () => {
   };
 
   // Real-time synchronization: silently refresh on external updates, other roles' mutations, or window resume
-  useRealtimeSync(['TICKET', 'CUSTOMER', 'DEVICE'], () => {
+  useRealtimeSync(['TICKET', 'CUSTOMER', 'DEVICE', 'INVOICE'], () => {
     fetchTickets(false);
+    loadTechsAndInventory();
   });
 
   const loadTechsAndInventory = async () => {
     try {
-      const [techRes, invRes, custRes] = await Promise.all([
+      const [techRes, invRes, custRes, invcRes] = await Promise.all([
         api.get<ApiResponse<User[]>>('/staff/technicians'),
         api.get<ApiResponse<InventoryItem[]>>('/inventory'),
         api.get<ApiResponse<Customer[]>>('/customers'),
+        api.get<ApiResponse<Invoice[]>>('/invoices').catch(() => null),
       ]);
       if (techRes.data.success) setTechnicians(techRes.data.data);
       if (invRes.data.success) setInventory(invRes.data.data);
       if (custRes.data.success) setCustomers(custRes.data.data);
+      if (invcRes && invcRes.data && invcRes.data.success) {
+        const invoicedSet = new Set<number>(
+          invcRes.data.data
+            .filter((inv) => inv.repairTicket && inv.status !== 'CANCELLED')
+            .map((inv) => inv.repairTicket!.id)
+        );
+        setInvoicedTicketIds(invoicedSet);
+      }
     } catch (err) {
       console.error('Failed to load reference data', err);
     }
@@ -419,19 +436,63 @@ export const Tickets: React.FC = () => {
     if (!activeTicket) return;
     setSavingDiagnosis(true);
     try {
+      const updatedEst = estCost ? Number(estCost) : 0;
+      const updatedLabor = laborCharge ? Number(laborCharge) : 0;
       await api.patch(`/tickets/${activeTicket.id}/diagnosis`, {
         diagnosticNotes: diagNotes,
-        estimatedCost: estCost ? Number(estCost) : 0,
-        laborCharge: laborCharge ? Number(laborCharge) : 0,
+        estimatedCost: updatedEst,
+        laborCharge: updatedLabor,
       });
       toast.success('Diagnosis and quotation updated successfully');
+      setActiveTicket({
+        ...activeTicket,
+        diagnosticNotes: diagNotes,
+        estimatedCost: updatedEst,
+        laborCharge: updatedLabor,
+      });
       fetchTickets();
-      setShowActionModal(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Failed to update diagnosis');
     } finally {
       setSavingDiagnosis(false);
     }
+  };
+
+  const handleShareWhatsAppQuote = (ticket: RepairTicket) => {
+    if (!ticket.customer?.phone) {
+      toast.error('Customer phone number not available');
+      return;
+    }
+    // Clean phone number (strip spaces/dashes)
+    let phone = ticket.customer.phone.replace(/[^0-9]/g, '');
+    if (phone.length === 10) {
+      phone = '91' + phone; // Default to India country code if 10 digits
+    }
+
+    const deviceName = ticket.device ? `${ticket.device.brand} ${ticket.device.modelName}` : 'Device';
+    const estTotal = ticket.estimatedCost || 0;
+    const labor = ticket.laborCharge || 0;
+    const partsEst = Math.max(0, estTotal - labor);
+    const trackingUrl = `${window.location.origin}/track/${ticket.ticketNumber}`;
+
+    const text =
+      `Hello ${ticket.customer.fullName},\n\n` +
+      `Here is the repair quotation for your *${deviceName}* (Ticket: *#${ticket.ticketNumber}*):\n\n` +
+      `🔍 *Diagnosis Findings:* ${ticket.diagnosticNotes || 'Hardware diagnosis completed.'}\n` +
+      `💵 *Estimated Total:* ₹${estTotal.toLocaleString('en-IN')}\n` +
+      `   • Estimated Parts: ₹${partsEst.toLocaleString('en-IN')}\n` +
+      `   • Labor & Service: ₹${labor.toLocaleString('en-IN')}\n\n` +
+      `📱 *View Diagnosis & Approve Online:* ${trackingUrl}\n\n` +
+      `Please reply with your approval to proceed with the repair.\n` +
+      `— TechCare Multi-Brand Service Center`;
+
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+  };
+
+  const handleOpenQuotation = (ticket: RepairTicket) => {
+    setQuotationTicket(ticket);
+    setShowQuotationModal(true);
   };
 
   const handleStatusTransition = async () => {
@@ -892,6 +953,51 @@ export const Tickets: React.FC = () => {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                          {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) &&
+                            !['CANCELLED', 'REJECTED'].includes(t.status) && (
+                              <button
+                                className={invoicedTicketIds.has(t.id) ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm'}
+                                title={invoicedTicketIds.has(t.id) ? 'View Tax Invoice in Billing' : 'Generate Tax Invoice'}
+                                onClick={() => {
+                                  if (invoicedTicketIds.has(t.id)) {
+                                    navigate('/billing', { state: { searchTicketNumber: t.ticketNumber } });
+                                  } else {
+                                    navigate('/billing', {
+                                      state: {
+                                        autoOpenInvoice: true,
+                                        preselectedTicketId: t.id,
+                                      },
+                                    });
+                                  }
+                                }}
+                                style={{
+                                  fontSize: '0.75rem',
+                                  height: 28,
+                                  padding: '0 8px',
+                                  color: invoicedTicketIds.has(t.id) ? 'var(--status-success-text)' : undefined,
+                                }}
+                              >
+                                <ReceiptText size={13} />
+                                <span>{invoicedTicketIds.has(t.id) ? 'View Bill' : 'Bill'}</span>
+                              </button>
+                            )}
+                          {Number(t.estimatedCost || 0) > 0 && (
+                            <button
+                              className="btn btn-outline btn-sm"
+                              title="Send Quotation via WhatsApp"
+                              onClick={() => handleShareWhatsAppQuote(t)}
+                              style={{
+                                fontSize: '0.75rem',
+                                height: 28,
+                                padding: '0 8px',
+                                color: '#16a34a',
+                                borderColor: '#86efac',
+                              }}
+                            >
+                              <MessageCircle size={13} />
+                              <span>Quote</span>
+                            </button>
+                          )}
                           <button
                             className="btn btn-outline btn-sm"
                             onClick={() => openTicketDetails(t)}
@@ -995,8 +1101,43 @@ export const Tickets: React.FC = () => {
                   </div>
 
                   <div style={{ display: 'flex', gap: 6 }}>
+                    {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) &&
+                      !['CANCELLED', 'REJECTED'].includes(t.status) && (
+                        <button
+                          className={invoicedTicketIds.has(t.id) ? 'btn btn-outline btn-sm' : 'btn btn-primary btn-sm'}
+                          onClick={() => {
+                            if (invoicedTicketIds.has(t.id)) {
+                              navigate('/billing', { state: { searchTicketNumber: t.ticketNumber } });
+                            } else {
+                              navigate('/billing', {
+                                state: {
+                                  autoOpenInvoice: true,
+                                  preselectedTicketId: t.id,
+                                },
+                              });
+                            }
+                          }}
+                          style={{
+                            fontSize: '0.75rem',
+                            color: invoicedTicketIds.has(t.id) ? 'var(--status-success-text)' : undefined,
+                          }}
+                        >
+                          <ReceiptText size={13} />
+                          <span>{invoicedTicketIds.has(t.id) ? 'View Bill' : 'Bill'}</span>
+                        </button>
+                      )}
+                    {Number(t.estimatedCost || 0) > 0 && (
+                      <button
+                        className="btn btn-outline btn-sm"
+                        onClick={() => handleShareWhatsAppQuote(t)}
+                        style={{ fontSize: '0.75rem', color: '#16a34a', borderColor: '#86efac' }}
+                      >
+                        <MessageCircle size={13} />
+                        <span>Quote</span>
+                      </button>
+                    )}
                     <button
-                      className="btn btn-primary btn-sm"
+                      className="btn btn-outline btn-sm"
                       onClick={() => openTicketDetails(t)}
                     >
                       <Sliders size={13} />
@@ -1528,30 +1669,88 @@ export const Tickets: React.FC = () => {
                   color: '#1e293b',
                   display: 'flex',
                   alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <AlertCircle size={16} color="#0071e3" style={{ flexShrink: 0 }} />
+                <span>
+                  <strong>Customer Handover Requirement:</strong> Delivering a device (DELIVERED) is executed by counter Receptionists or Admins once any associated repair invoice is settled in full.
+                </span>
+              </div>
+            )}
+
+            {/* Direct Billing Action for Receptionist & Admin */}
+            {!hasRole('TECHNICIAN') && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: '12px 14px',
+                  background: invoicedTicketIds.has(activeTicket.id)
+                    ? 'rgba(34, 197, 94, 0.06)'
+                    : 'rgba(0, 113, 227, 0.06)',
+                  border: invoicedTicketIds.has(activeTicket.id)
+                    ? '1px solid rgba(34, 197, 94, 0.25)'
+                    : '1px solid rgba(0, 113, 227, 0.25)',
+                  borderRadius: 10,
+                  display: 'flex',
+                  alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: 10,
+                  gap: 12,
                   flexWrap: 'wrap',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 220 }}>
-                  <AlertCircle size={16} color="#0071e3" style={{ flexShrink: 0 }} />
-                  <span>
-                    <strong>Customer Handover Requirement:</strong> Delivering a device (DELIVERED) is executed by counter Receptionists or Admins once any associated repair invoice is settled in full.
-                  </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 220 }}>
+                  {invoicedTicketIds.has(activeTicket.id) ? (
+                    <CheckCircle2 size={18} color="var(--status-success)" style={{ flexShrink: 0 }} />
+                  ) : (
+                    <ReceiptText size={18} color="var(--primary)" style={{ flexShrink: 0 }} />
+                  )}
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: '0.84rem', color: 'var(--text-primary)' }}>
+                      {invoicedTicketIds.has(activeTicket.id)
+                        ? 'Tax Invoice Generated'
+                        : 'Billing & Invoice Generation'}
+                    </div>
+                    <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                      {invoicedTicketIds.has(activeTicket.id)
+                        ? 'An invoice is already generated for this repair ticket.'
+                        : 'Click below to directly open Billing and generate tax invoice for this ticket.'}
+                    </div>
+                  </div>
                 </div>
-                {!hasRole('TECHNICIAN') && (
+
+                {invoicedTicketIds.has(activeTicket.id) ? (
                   <button
                     type="button"
-                    className="btn btn-outline btn-xs"
+                    className="btn btn-outline btn-sm"
                     onClick={() => {
                       setShowActionModal(false);
-                      navigate('/billing');
+                      navigate('/billing', { state: { searchTicketNumber: activeTicket.ticketNumber } });
                     }}
-                    style={{ whiteSpace: 'nowrap', fontSize: '0.75rem', height: 28 }}
+                    style={{ whiteSpace: 'nowrap', gap: 6, fontSize: '0.78rem' }}
                   >
-                    Open Billing & Payments →
+                    <ReceiptText size={14} />
+                    <span>View Bill in Billing →</span>
                   </button>
-                )}
+                ) : !['CANCELLED', 'REJECTED'].includes(activeTicket.status) ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => {
+                      setShowActionModal(false);
+                      navigate('/billing', {
+                        state: {
+                          autoOpenInvoice: true,
+                          preselectedTicketId: activeTicket.id,
+                        },
+                      });
+                    }}
+                    style={{ whiteSpace: 'nowrap', gap: 6, fontSize: '0.78rem' }}
+                  >
+                    <ReceiptText size={14} />
+                    <span>Generate Bill for this Ticket →</span>
+                  </button>
+                ) : null}
               </div>
             )}
           </div>
@@ -1621,6 +1820,158 @@ export const Tickets: React.FC = () => {
                   </button>
                 </div>
               </>
+            )}
+
+            {/* Customer Quotation Sharing Box */}
+            {(Number(activeTicket.estimatedCost || 0) > 0 || Number(estCost || 0) > 0) && (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: '12px 14px',
+                  background: 'rgba(34, 197, 94, 0.05)',
+                  border: '1px solid rgba(34, 197, 94, 0.25)',
+                  borderRadius: 10,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--status-success-text, #16a34a)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <ReceiptText size={16} />
+                      <span>Customer Quotation Ready</span>
+                    </div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                      Total Estimate: <strong>₹{Number(activeTicket.estimatedCost || estCost || 0).toLocaleString('en-IN')}</strong> (Labor: ₹{Number(activeTicket.laborCharge || laborCharge || 0).toLocaleString('en-IN')})
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      style={{
+                        background: '#25D366',
+                        color: '#fff',
+                        border: 'none',
+                        fontWeight: 600,
+                        fontSize: '0.76rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '5px 12px',
+                        borderRadius: 6,
+                      }}
+                      onClick={() => handleShareWhatsAppQuote(activeTicket)}
+                      title="Send repair estimate & tracking link to customer on WhatsApp"
+                    >
+                      <MessageCircle size={14} />
+                      <span>WhatsApp Quote</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-outline btn-sm"
+                      style={{
+                        fontSize: '0.76rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        padding: '5px 10px',
+                      }}
+                      onClick={() => handleOpenQuotation(activeTicket)}
+                      title="Preview & print official estimate sheet"
+                    >
+                      <Printer size={14} />
+                      <span>Print Estimate Sheet</span>
+                    </button>
+                    <a
+                      href={`/track/${activeTicket.ticketNumber}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="btn btn-ghost btn-sm"
+                      style={{
+                        fontSize: '0.76rem',
+                        color: 'var(--primary)',
+                        padding: '5px 8px',
+                        textDecoration: 'none',
+                      }}
+                    >
+                      Customer View ↗
+                    </a>
+                  </div>
+                </div>
+
+                {/* Quick verbal customer approval / decline controls for staff */}
+                {['ESTIMATION_PENDING', 'DIAGNOSING'].includes(activeTicket.status) && (
+                  <div
+                    style={{
+                      borderTop: '1px dashed rgba(34, 197, 94, 0.25)',
+                      paddingTop: 8,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      flexWrap: 'wrap',
+                      fontSize: '0.76rem',
+                    }}
+                  >
+                    <span style={{ color: 'var(--text-secondary)' }}>
+                      Customer response received over call/counter?
+                    </span>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        style={{
+                          fontSize: '0.72rem',
+                          padding: '2px 8px',
+                          height: 26,
+                          color: 'var(--status-success-text, #16a34a)',
+                          borderColor: 'var(--status-success-border, #bbf7d0)',
+                        }}
+                        onClick={async () => {
+                          try {
+                            await api.patch(`/tickets/${activeTicket.id}/status`, {
+                              status: 'APPROVED_BY_CUSTOMER',
+                              remarks: 'Customer accepted quotation verbally (confirmed by staff)',
+                            });
+                            toast.success('Quotation marked as Approved by Customer');
+                            fetchTickets();
+                            setShowActionModal(false);
+                          } catch (e: any) {
+                            toast.error(e.response?.data?.message || 'Failed to update');
+                          }
+                        }}
+                      >
+                        ✓ Mark Approved
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        style={{
+                          fontSize: '0.72rem',
+                          padding: '2px 8px',
+                          height: 26,
+                          color: 'var(--status-danger-text, #ef4444)',
+                          borderColor: '#fca5a5',
+                        }}
+                        onClick={async () => {
+                          try {
+                            await api.patch(`/tickets/${activeTicket.id}/status`, {
+                              status: 'REJECTED',
+                              remarks: 'Customer declined quotation estimate',
+                            });
+                            toast.success('Ticket marked as Rejected by Customer');
+                            fetchTickets();
+                            setShowActionModal(false);
+                          } catch (e: any) {
+                            toast.error(e.response?.data?.message || 'Failed to update');
+                          }
+                        }}
+                      >
+                        ✕ Mark Declined
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -1734,6 +2085,217 @@ export const Tickets: React.FC = () => {
 
           <div className="modal-footer">
             <button className="btn btn-outline" onClick={() => setShowActionModal(false)}>
+              Close
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* MODAL 3: CUSTOMER ESTIMATE QUOTATION SHEET (PRINTABLE) */}
+      {quotationTicket && (
+        <Modal
+          isOpen={showQuotationModal}
+          onClose={() => setShowQuotationModal(false)}
+          title={`Repair Quotation — #${quotationTicket.ticketNumber}`}
+          description="Customer repair cost estimate & diagnosis summary"
+          maxWidth={680}
+        >
+          <div
+            id="quotation-sheet-printable"
+            style={{
+              padding: '16px',
+              backgroundColor: '#fff',
+              color: '#0f172a',
+              borderRadius: 8,
+              border: '1px solid #e2e8f0',
+              fontFamily: 'Inter, system-ui, sans-serif',
+            }}
+          >
+            {/* Header */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                borderBottom: '2px solid #0071e3',
+                paddingBottom: 14,
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 800, color: '#0071e3', letterSpacing: '-0.02em' }}>
+                  TECHCARE SERVICE SOLUTIONS
+                </div>
+                <div style={{ fontSize: '0.80rem', color: '#64748b' }}>
+                  Authorized Multi-Brand Tech Diagnostics & Repair Center
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 3 }}>
+                  Phone: +91 98765 43210 • Support: care@techcare.internal
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    padding: '3px 10px',
+                    borderRadius: 4,
+                    background: '#e0f2fe',
+                    color: '#0369a1',
+                    fontWeight: 700,
+                    fontSize: '0.75rem',
+                    textTransform: 'uppercase',
+                    marginBottom: 4,
+                  }}
+                >
+                  Repair Quotation
+                </span>
+                <div style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a' }}>
+                  #{quotationTicket.ticketNumber}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  Date: {new Date(quotationTicket.createdAt).toLocaleDateString()}
+                </div>
+              </div>
+            </div>
+
+            {/* Customer & Equipment Grid */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 14,
+                backgroundColor: '#f8fafc',
+                padding: '12px 14px',
+                borderRadius: 6,
+                marginBottom: 16,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                  Customer Details
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a', marginTop: 2 }}>
+                  {quotationTicket.customer?.fullName}
+                </div>
+                <div style={{ fontSize: '0.80rem', color: '#334155', marginTop: 2 }}>
+                  Phone: {quotationTicket.customer?.phone}
+                </div>
+                {quotationTicket.customer?.email && (
+                  <div style={{ fontSize: '0.80rem', color: '#334155' }}>
+                    Email: {quotationTicket.customer.email}
+                  </div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#64748b', textTransform: 'uppercase' }}>
+                  Device Equipment
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a', marginTop: 2 }}>
+                  {quotationTicket.device?.brand} {quotationTicket.device?.modelName}
+                </div>
+                <div style={{ fontSize: '0.80rem', color: '#334155', marginTop: 2 }}>
+                  Type: {quotationTicket.device?.deviceType} • SN: {quotationTicket.device?.serialNumber || 'N/A'}
+                </div>
+                <div style={{ fontSize: '0.80rem', color: '#334155' }}>
+                  Reported Issue: <em>{quotationTicket.problemReported}</em>
+                </div>
+              </div>
+            </div>
+
+            {/* Diagnostic Findings */}
+            <div
+              style={{
+                border: '1px solid #e2e8f0',
+                borderRadius: 6,
+                padding: '12px 14px',
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ fontSize: '0.74rem', fontWeight: 700, color: '#475569', textTransform: 'uppercase', marginBottom: 4 }}>
+                Technician Diagnostic Findings
+              </div>
+              <div style={{ fontSize: '0.86rem', color: '#1e293b', whiteSpace: 'pre-wrap' }}>
+                {quotationTicket.diagnosticNotes || 'Inspection completed. Hardware overhaul/repair required as estimated below.'}
+              </div>
+            </div>
+
+            {/* Cost Breakdown Table */}
+            <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 16, fontSize: '0.85rem' }}>
+              <thead>
+                <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1' }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 700, color: '#334155' }}>Item / Description</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700, color: '#334155' }}>Estimated Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                  <td style={{ padding: '8px 10px', color: '#1e293b' }}>
+                    <strong>Estimated Spare Parts & Hardware Components</strong>
+                    <div style={{ fontSize: '0.74rem', color: '#64748b' }}>Replacement components required for repair</div>
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
+                    ₹{Math.max(0, (quotationTicket.estimatedCost || 0) - (quotationTicket.laborCharge || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid #e2e8f0' }}>
+                  <td style={{ padding: '8px 10px', color: '#1e293b' }}>
+                    <strong>Labor & Workshop Diagnostics Service Charge</strong>
+                    <div style={{ fontSize: '0.74rem', color: '#64748b' }}>Level-2/3 technician bench labor & post-repair testing</div>
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
+                    ₹{Number(quotationTicket.laborCharge || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+                <tr style={{ background: '#f8fafc', borderTop: '2px solid #0071e3' }}>
+                  <td style={{ padding: '10px', fontWeight: 800, fontSize: '1rem', color: '#0f172a' }}>
+                    Total Estimated Repair Cost
+                  </td>
+                  <td style={{ padding: '10px', textAlign: 'right', fontWeight: 800, fontSize: '1.1rem', color: '#0071e3' }}>
+                    ₹{Number(quotationTicket.estimatedCost || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+
+            {/* Terms and conditions */}
+            <div style={{ fontSize: '0.72rem', color: '#64748b', lineHeight: 1.5, borderTop: '1px solid #e2e8f0', paddingTop: 10 }}>
+              <div>• This estimation is valid for 7 calendar days from the date of issue.</div>
+              <div>• Additional defects found during microscopic teardown will be reported to the customer before proceeding.</div>
+              <div>• Customer can track real-time status and provide approval at: <strong>{window.location.origin}/track/{quotationTicket.ticketNumber}</strong></div>
+            </div>
+          </div>
+
+          <div className="modal-footer" style={{ marginTop: 16 }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              style={{
+                background: '#25D366',
+                color: '#fff',
+                border: 'none',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+              onClick={() => handleShareWhatsAppQuote(quotationTicket)}
+            >
+              <MessageCircle size={15} />
+              <span>Send WhatsApp</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+              onClick={() => window.print()}
+            >
+              <Printer size={15} />
+              <span>Print Quote</span>
+            </button>
+            <button
+              type="button"
+              className="btn btn-outline btn-sm"
+              onClick={() => setShowQuotationModal(false)}
+            >
               Close
             </button>
           </div>

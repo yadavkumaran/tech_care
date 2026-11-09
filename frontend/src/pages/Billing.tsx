@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useOutletContext, useLocation, useNavigate } from 'react-router-dom';
 import {
   Plus,
   ReceiptText,
@@ -21,6 +21,7 @@ import { Modal } from '../components/ui/Modal';
 import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { StatCard } from '../components/ui/StatCard';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SearchInput } from '../components/ui/SearchInput';
 import api from '../api/client';
 import { ApiResponse, Customer, Invoice, Payment, RepairTicket } from '../types';
 import { useToast } from '../context/ToastContext';
@@ -32,6 +33,7 @@ export const Billing: React.FC = () => {
   const [tickets, setTickets] = useState<RepairTicket[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // New Invoice Modal
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
@@ -56,6 +58,40 @@ export const Billing: React.FC = () => {
   const { toast } = useToast();
   const { broadcastLocalUpdate } = useSync();
   const outletContext = useOutletContext<LayoutContextType | null>();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  // Listen to navigation state from Tickets page (e.g. direct "Generate Bill" or "View Bill")
+  useEffect(() => {
+    const state = location.state as {
+      autoOpenInvoice?: boolean;
+      preselectedTicketId?: number;
+      searchTicketNumber?: string;
+    } | null;
+
+    if (state?.preselectedTicketId) {
+      setSelectedTicketId(state.preselectedTicketId);
+      if (state.autoOpenInvoice) {
+        setShowInvoiceModal(true);
+      }
+      navigate(location.pathname, { replace: true, state: {} });
+    } else if (state?.searchTicketNumber) {
+      setSearchTerm(state.searchTicketNumber);
+      navigate(location.pathname, { replace: true, state: {} });
+    }
+  }, [location.state, navigate, location.pathname]);
+
+  // Support query parameters ?ticketId=123&create=true
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const paramTicketId = params.get('ticketId');
+    if (paramTicketId) {
+      setSelectedTicketId(Number(paramTicketId));
+      if (params.get('create') === 'true') {
+        setShowInvoiceModal(true);
+      }
+    }
+  }, [location.search]);
 
   useEffect(() => {
     fetchData(true);
@@ -179,6 +215,30 @@ export const Billing: React.FC = () => {
     invoices.filter((i) => i.repairTicket && i.status !== 'CANCELLED').map((i) => i.repairTicket!.id)
   );
 
+  // Filter ONLY available tickets that can be billed:
+  // 1. Not already invoiced
+  // 2. Not in cancelled or rejected status
+  // Also preserve currently selected ticket if navigated directly from tickets page
+  const billableTickets = tickets.filter((t) => {
+    if (selectedTicketId && t.id === Number(selectedTicketId)) return true;
+    if (invoicedTicketIds.has(t.id)) return false;
+    if (t.status === 'CANCELLED' || t.status === 'REJECTED') return false;
+    return true;
+  });
+
+  const selectedTicket = tickets.find((t) => t.id === Number(selectedTicketId));
+
+  const filteredInvoices = invoices.filter((inv) => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    return (
+      inv.invoiceNumber.toLowerCase().includes(term) ||
+      inv.customer?.fullName?.toLowerCase().includes(term) ||
+      inv.customer?.phone?.includes(term) ||
+      (inv.repairTicket?.ticketNumber && inv.repairTicket.ticketNumber.toLowerCase().includes(term))
+    );
+  });
+
   return (
     <>
       <Navbar
@@ -219,9 +279,12 @@ export const Billing: React.FC = () => {
 
         {/* Action Header */}
         <div className="page-control-bar">
-          <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-            Official GST tax invoices generated for repairs & sales
-          </div>
+          <SearchInput
+            placeholder="Search by invoice #, customer, phone, or ticket #..."
+            value={searchTerm}
+            onChange={setSearchTerm}
+            maxWidth={440}
+          />
 
           <div className="page-actions-group">
             <button className="btn btn-primary" onClick={() => setShowInvoiceModal(true)}>
@@ -250,8 +313,8 @@ export const Billing: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {invoices.length > 0 ? (
-                  invoices.map((inv) => (
+                {filteredInvoices.length > 0 ? (
+                  filteredInvoices.map((inv) => (
                     <tr key={inv.id}>
                       <td style={{ fontWeight: 600 }}>
                         <span
@@ -330,10 +393,10 @@ export const Billing: React.FC = () => {
                     <td colSpan={10}>
                       <EmptyState
                         icon={ReceiptText}
-                        title={loading ? 'Loading tax invoices...' : 'No invoices generated'}
-                        description="Generate an invoice from a diagnosed or completed repair ticket."
-                        actionText={!loading ? 'Generate Invoice' : undefined}
-                        onAction={!loading ? () => setShowInvoiceModal(true) : undefined}
+                        title={loading ? 'Loading tax invoices...' : (searchTerm ? 'No matching invoices' : 'No invoices generated')}
+                        description={searchTerm ? `No invoices found matching "${searchTerm}". Try another search term.` : 'Generate an invoice from a diagnosed or completed repair ticket.'}
+                        actionText={!loading && !searchTerm ? 'Generate Invoice' : undefined}
+                        onAction={!loading && !searchTerm ? () => setShowInvoiceModal(true) : undefined}
                         actionIcon={<Plus size={15} />}
                       />
                     </td>
@@ -346,8 +409,8 @@ export const Billing: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="mobile-card-list">
-          {invoices.length > 0 ? (
-            invoices.map((inv) => (
+          {filteredInvoices.length > 0 ? (
+            filteredInvoices.map((inv) => (
               <div key={inv.id} className="mobile-data-card">
                 <div className="mobile-card-header">
                   <div>
@@ -418,10 +481,10 @@ export const Billing: React.FC = () => {
           ) : (
             <EmptyState
               icon={ReceiptText}
-              title="No invoices found"
-              description="Generate tax invoices from completed repair job tickets."
-              actionText="Generate Invoice"
-              onAction={() => setShowInvoiceModal(true)}
+              title={loading ? 'Loading invoices...' : (searchTerm ? 'No matching invoices' : 'No invoices found')}
+              description={searchTerm ? `No invoices found matching "${searchTerm}".` : 'Generate tax invoices from completed repair job tickets.'}
+              actionText={!loading && !searchTerm ? 'Generate Invoice' : undefined}
+              onAction={!loading && !searchTerm ? () => setShowInvoiceModal(true) : undefined}
               actionIcon={<Plus size={15} />}
             />
           )}
@@ -433,7 +496,7 @@ export const Billing: React.FC = () => {
         isOpen={showInvoiceModal}
         onClose={() => setShowInvoiceModal(false)}
         title="Generate Tax Invoice"
-        description="Select a diagnosed repair job to compute parts and labor charges"
+        description="Select an available repair ticket to compute parts and labor charges"
         maxWidth={600}
       >
         <form onSubmit={handleCreateInvoice}>
@@ -445,27 +508,68 @@ export const Billing: React.FC = () => {
               className="form-control"
               required
               value={selectedTicketId}
-              onChange={(e) => setSelectedTicketId(Number(e.target.value))}
+              onChange={(e) => setSelectedTicketId(e.target.value ? Number(e.target.value) : '')}
               autoFocus
             >
-              <option value="">-- Choose Ticket --</option>
-              {tickets.map((t) => {
-                const isAlreadyInvoiced = invoicedTicketIds.has(t.id);
-                const isTerminal = t.status === 'CANCELLED' || t.status === 'REJECTED';
-                const isDisabled = isAlreadyInvoiced || isTerminal;
-                let suffix = '';
-                if (isAlreadyInvoiced) suffix = ' — [Already Invoiced]';
-                else if (t.status === 'CANCELLED') suffix = ' — [Cancelled Ticket]';
-                else if (t.status === 'REJECTED') suffix = ' — [Estimate Rejected]';
-
-                return (
-                  <option key={t.id} value={t.id} disabled={isDisabled}>
-                    #{t.ticketNumber} — {t.customer?.fullName || 'Customer'} ({t.device?.brand || ''} {t.device?.modelName || 'Device'}) [{t.status}]{suffix}
-                  </option>
-                );
-              })}
+              <option value="">
+                {billableTickets.length > 0
+                  ? `-- Choose Billable Ticket (${billableTickets.length} Available) --`
+                  : '-- No Pending Billable Tickets Available --'}
+              </option>
+              {billableTickets.map((t) => (
+                <option key={t.id} value={t.id}>
+                  #{t.ticketNumber} — {t.customer?.fullName || 'Customer'} ({t.device?.brand || ''} {t.device?.modelName || 'Device'}) • ₹{Number(t.estimatedCost || 0).toLocaleString('en-IN')} [{t.status.replace(/_/g, ' ')}]
+                </option>
+              ))}
             </select>
+            {billableTickets.length === 0 && (
+              <div
+                style={{
+                  marginTop: 8,
+                  padding: '8px 12px',
+                  background: 'var(--status-info-bg)',
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 8,
+                  fontSize: '0.80rem',
+                  color: 'var(--text-secondary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+              >
+                <AlertCircle size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
+                <span>All active repair tickets are already invoiced or none are pending billing.</span>
+              </div>
+            )}
           </div>
+
+          {selectedTicket && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: '12px 14px',
+                background: 'rgba(0, 113, 227, 0.05)',
+                border: '1px solid rgba(0, 113, 227, 0.2)',
+                borderRadius: 10,
+                fontSize: '0.84rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {selectedTicket.device?.brand} {selectedTicket.device?.modelName}
+                </span>
+                <span className="badge badge-outline" style={{ fontSize: '0.72rem' }}>
+                  {selectedTicket.status.replace(/_/g, ' ')}
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 6, color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+                <div>Customer: <b style={{ color: 'var(--text-primary)' }}>{selectedTicket.customer?.fullName}</b></div>
+                <div>Phone: <b style={{ color: 'var(--text-primary)' }}>{selectedTicket.customer?.phone}</b></div>
+                <div>Labor Fee: <b style={{ color: 'var(--text-primary)' }}>₹{Number(selectedTicket.laborCharge || 0).toFixed(2)}</b></div>
+                <div>Estimated: <b style={{ color: 'var(--text-primary)' }}>₹{Number(selectedTicket.estimatedCost || 0).toFixed(2)}</b></div>
+              </div>
+            </div>
+          )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
             <div className="form-group">
