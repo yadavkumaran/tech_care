@@ -19,6 +19,7 @@ import { SearchInput } from '../components/ui/SearchInput';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
 import { ApiResponse, InventoryItem } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -252,7 +253,9 @@ export const Inventory: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.length > 0 ? (
+                {loading ? (
+                  <SkeletonTableRows count={5} columns={8} />
+                ) : filteredItems.length > 0 ? (
                   filteredItems.map((item) => {
                     const isLowStock = item.currentStock <= item.reorderLevel;
                     return (
@@ -357,7 +360,13 @@ export const Inventory: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="mobile-card-list">
-          {filteredItems.length > 0 ? (
+          {loading ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : filteredItems.length > 0 ? (
             filteredItems.map((item) => {
               const isLowStock = item.currentStock <= item.reorderLevel;
               return (

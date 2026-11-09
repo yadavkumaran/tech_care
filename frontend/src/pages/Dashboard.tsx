@@ -20,6 +20,7 @@ import { Navbar } from '../components/Navbar';
 import { StatCard } from '../components/ui/StatCard';
 import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonStatCard, SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
 import { ApiResponse, DashboardStats } from '../types';
 import { LayoutContextType } from '../components/Layout';
@@ -153,7 +154,14 @@ export const Dashboard: React.FC = () => {
       <div className="page-body">
         {/* KPI Counter Grid (Tailored per role) */}
         <div className="stat-grid">
-          {isTechnician ? (
+          {loading ? (
+            <>
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+            </>
+          ) : isTechnician ? (
             <>
               <StatCard
                 title="My Active Queue"
@@ -555,7 +563,9 @@ export const Dashboard: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {ticketsToDisplay.length > 0 ? (
+                  {loading ? (
+                    <SkeletonTableRows count={5} columns={7} />
+                  ) : ticketsToDisplay.length > 0 ? (
                     ticketsToDisplay.map((t) => (
                       <tr key={t.id}>
                         <td style={{ fontWeight: 700 }}>
@@ -647,10 +657,10 @@ export const Dashboard: React.FC = () => {
                       <td colSpan={7}>
                         <EmptyState
                           icon={Wrench}
-                          title={loading ? 'Loading active tickets...' : 'No active repairs in the shop'}
+                          title={isTechnician ? 'No assigned bench jobs' : 'No active repairs in the shop'}
                           description={
-                            loading
-                              ? 'Fetching latest workbench updates...'
+                            isTechnician
+                              ? 'Your bench is clear. Check the ticket board for unassigned jobs.'
                               : 'All customer jobs are completed. Create a new intake ticket to get started.'
                           }
                         />
@@ -664,7 +674,13 @@ export const Dashboard: React.FC = () => {
 
           {/* Mobile Card View */}
           <div className="mobile-card-list" style={{ padding: 12 }}>
-            {ticketsToDisplay.length > 0 ? (
+            {loading ? (
+              <>
+                <SkeletonCard />
+                <SkeletonCard />
+                <SkeletonCard />
+              </>
+            ) : ticketsToDisplay.length > 0 ? (
               ticketsToDisplay.map((t) => (
                 <div key={t.id} className="mobile-data-card">
                   <div className="mobile-card-header">

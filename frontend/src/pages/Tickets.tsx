@@ -37,6 +37,7 @@ import { SearchInput } from '../components/ui/SearchInput';
 import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
 import {
   ApiResponse,
@@ -1002,7 +1003,9 @@ export const Tickets: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredTickets.length > 0 ? (
+                {loading ? (
+                  <SkeletonTableRows count={5} columns={8} />
+                ) : filteredTickets.length > 0 ? (
                   filteredTickets.map((t) => (
                     <tr key={t.id}>
                       <td style={{ fontWeight: 700 }}>
@@ -1162,10 +1165,10 @@ export const Tickets: React.FC = () => {
                     <td colSpan={8}>
                       <EmptyState
                         icon={Wrench}
-                        title={loading ? 'Loading tickets...' : 'No tickets match your filter criteria'}
+                        title="No tickets match your filter criteria"
                         description="Try another search term or filter status."
-                        actionText={!loading && !searchTerm && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? 'New Device Intake' : undefined}
-                        onAction={!loading && !searchTerm && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? () => setShowIntakeModal(true) : undefined}
+                        actionText={!searchTerm && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? 'New Device Intake' : undefined}
+                        onAction={!searchTerm && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? () => setShowIntakeModal(true) : undefined}
                         actionIcon={<Plus size={15} />}
                       />
                     </td>
@@ -1178,7 +1181,13 @@ export const Tickets: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="mobile-card-list">
-          {filteredTickets.length > 0 ? (
+          {loading ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : filteredTickets.length > 0 ? (
             filteredTickets.map((t) => (
               <div key={t.id} className="mobile-data-card">
                 <div className="mobile-card-header">
@@ -1315,10 +1324,10 @@ export const Tickets: React.FC = () => {
           ) : (
             <EmptyState
               icon={Wrench}
-              title={loading ? 'Loading tickets...' : 'No tickets match filter'}
+              title="No tickets match filter"
               description="No repair tickets match the selected status filter or search query."
-              actionText={!loading && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? 'New Device Intake' : undefined}
-              onAction={!loading && (hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? () => setShowIntakeModal(true) : undefined}
+              actionText={(hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? 'New Device Intake' : undefined}
+              onAction={(hasRole('ADMIN') || hasRole('RECEPTIONIST')) ? () => setShowIntakeModal(true) : undefined}
               actionIcon={<Plus size={15} />}
             />
           )}

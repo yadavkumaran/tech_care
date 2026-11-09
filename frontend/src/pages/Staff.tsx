@@ -18,6 +18,7 @@ import { Navbar } from '../components/Navbar';
 import { Modal } from '../components/ui/Modal';
 import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
 import { ApiResponse, User } from '../types';
 import { useToast } from '../context/ToastContext';
@@ -201,7 +202,9 @@ export const Staff: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {staffList.length > 0 ? (
+                {loading ? (
+                  <SkeletonTableRows count={5} columns={6} />
+                ) : staffList.length > 0 ? (
                   staffList.map((u) => {
                     const initials = u.fullName
                       .split(' ')
@@ -318,7 +321,13 @@ export const Staff: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="mobile-card-list">
-          {staffList.length > 0 ? (
+          {loading ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : staffList.length > 0 ? (
             staffList.map((u) => {
               const initials = u.fullName
                 .split(' ')

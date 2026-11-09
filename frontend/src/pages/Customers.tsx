@@ -19,6 +19,7 @@ import { SearchInput } from '../components/ui/SearchInput';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
 import { ApiResponse, Customer, CustomerDevice } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -284,7 +285,9 @@ export const Customers: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {customers.length > 0 ? (
+                {loading ? (
+                  <SkeletonTableRows count={5} columns={6} />
+                ) : customers.length > 0 ? (
                   customers.map((c) => {
                     const initials = c.fullName
                       .split(' ')
@@ -430,7 +433,13 @@ export const Customers: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="mobile-card-list">
-          {customers.length > 0 ? (
+          {loading ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : customers.length > 0 ? (
             customers.map((c) => {
               const initials = c.fullName
                 .split(' ')

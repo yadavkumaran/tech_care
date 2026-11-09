@@ -21,6 +21,7 @@ import { Navbar } from '../components/Navbar';
 import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
+import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
 import { ApiResponse, InventoryItem } from '../types';
 import { useToast } from '../context/ToastContext';
@@ -351,7 +352,9 @@ export const Purchases: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {purchases.length > 0 ? (
+                    {loading ? (
+                      <SkeletonTableRows count={5} columns={7} />
+                    ) : purchases.length > 0 ? (
                       purchases.map((p) => (
                         <tr key={p.id}>
                           <td style={{ fontWeight: 600 }}>
@@ -407,7 +410,13 @@ export const Purchases: React.FC = () => {
 
             {/* Mobile View */}
             <div className="mobile-card-list">
-              {purchases.length > 0 ? (
+              {loading ? (
+                <>
+                  <SkeletonCard />
+                  <SkeletonCard />
+                  <SkeletonCard />
+                </>
+              ) : purchases.length > 0 ? (
                 purchases.map((p) => (
                   <div key={p.id} className="mobile-data-card">
                     <div className="mobile-card-header">
@@ -479,7 +488,9 @@ export const Purchases: React.FC = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {vendors.length > 0 ? (
+                    {loading ? (
+                      <SkeletonTableRows count={5} columns={6} />
+                    ) : vendors.length > 0 ? (
                       vendors.map((v) => (
                         <tr key={v.id}>
                           <td>
@@ -561,7 +572,13 @@ export const Purchases: React.FC = () => {
 
             {/* Mobile View */}
             <div className="mobile-card-list">
-              {vendors.length > 0 ? (
+              {loading ? (
+                <>
+                  <SkeletonCard />
+                  <SkeletonCard />
+                  <SkeletonCard />
+                </>
+              ) : vendors.length > 0 ? (
                 vendors.map((v) => (
                   <div key={v.id} className="mobile-data-card">
                     <div className="mobile-card-header">

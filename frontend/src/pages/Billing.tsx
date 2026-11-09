@@ -22,6 +22,7 @@ import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { StatCard } from '../components/ui/StatCard';
 import { EmptyState } from '../components/ui/EmptyState';
 import { SearchInput } from '../components/ui/SearchInput';
+import { SkeletonStatCard, SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
 import { ApiResponse, Customer, Invoice, Payment, RepairTicket } from '../types';
 import { useToast } from '../context/ToastContext';
@@ -304,32 +305,42 @@ export const Billing: React.FC = () => {
       <div className="page-body">
         {/* KPI Summaries */}
         <div className="stat-grid" style={{ marginBottom: 16 }}>
-          <StatCard
-            title="Total Invoiced"
-            value={`₹${totalBilled.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-            icon={<ReceiptText size={22} />}
-            iconBg="var(--status-info-bg)"
-            iconColor="var(--status-info-text)"
-            footnote={`${invoices.length} total bills`}
-          />
+          {loading ? (
+            <>
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+              <SkeletonStatCard />
+            </>
+          ) : (
+            <>
+              <StatCard
+                title="Total Invoiced"
+                value={`₹${totalBilled.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                icon={<ReceiptText size={22} />}
+                iconBg="var(--status-info-bg)"
+                iconColor="var(--status-info-text)"
+                footnote={`${invoices.length} total bills`}
+              />
 
-          <StatCard
-            title="Total Collected"
-            value={`₹${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-            icon={<CheckCircle size={22} />}
-            iconBg="var(--status-success-bg)"
-            iconColor="var(--status-success-text)"
-            footnote="Settled in accounts"
-          />
+              <StatCard
+                title="Total Collected"
+                value={`₹${totalPaid.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                icon={<CheckCircle size={22} />}
+                iconBg="var(--status-success-bg)"
+                iconColor="var(--status-success-text)"
+                footnote="Settled in accounts"
+              />
 
-          <StatCard
-            title="Outstanding Dues"
-            value={`₹${totalDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
-            icon={<AlertCircle size={22} />}
-            iconBg="var(--status-warning-bg)"
-            iconColor="var(--status-warning-text)"
-            footnote="Receivables pending"
-          />
+              <StatCard
+                title="Outstanding Dues"
+                value={`₹${totalDue.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
+                icon={<AlertCircle size={22} />}
+                iconBg="var(--status-warning-bg)"
+                iconColor="var(--status-warning-text)"
+                footnote="Receivables pending"
+              />
+            </>
+          )}
         </div>
 
         {/* Action Header */}
@@ -368,7 +379,9 @@ export const Billing: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredInvoices.length > 0 ? (
+                {loading ? (
+                  <SkeletonTableRows count={5} columns={10} />
+                ) : filteredInvoices.length > 0 ? (
                   filteredInvoices.map((inv) => (
                     <tr key={inv.id}>
                       <td style={{ fontWeight: 600 }}>
@@ -448,10 +461,10 @@ export const Billing: React.FC = () => {
                     <td colSpan={10}>
                       <EmptyState
                         icon={ReceiptText}
-                        title={loading ? 'Loading tax invoices...' : (searchTerm ? 'No matching invoices' : 'No invoices generated')}
+                        title={searchTerm ? 'No matching invoices' : 'No invoices generated'}
                         description={searchTerm ? `No invoices found matching "${searchTerm}". Try another search term.` : 'Generate an invoice from a diagnosed or completed repair ticket.'}
-                        actionText={!loading && !searchTerm ? 'Generate Invoice' : undefined}
-                        onAction={!loading && !searchTerm ? () => setShowInvoiceModal(true) : undefined}
+                        actionText={!searchTerm ? 'Generate Invoice' : undefined}
+                        onAction={!searchTerm ? () => setShowInvoiceModal(true) : undefined}
                         actionIcon={<Plus size={15} />}
                       />
                     </td>
@@ -464,7 +477,13 @@ export const Billing: React.FC = () => {
 
         {/* Mobile Card View */}
         <div className="mobile-card-list">
-          {filteredInvoices.length > 0 ? (
+          {loading ? (
+            <>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </>
+          ) : filteredInvoices.length > 0 ? (
             filteredInvoices.map((inv) => (
               <div key={inv.id} className="mobile-data-card">
                 <div className="mobile-card-header">
