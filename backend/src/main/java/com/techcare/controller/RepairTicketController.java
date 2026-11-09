@@ -29,15 +29,9 @@ public class RepairTicketController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<RepairTicket>>> getAllTickets(
             @RequestParam(required = false) String search,
-            @RequestParam(required = false) TicketStatus status,
+            @RequestParam(required = false) String status,
             @RequestParam(required = false) Long technicianId) {
-        if (status != null) {
-            return ResponseEntity.ok(ApiResponse.success(ticketService.getTicketsByStatus(status)));
-        }
-        if (technicianId != null) {
-            return ResponseEntity.ok(ApiResponse.success(ticketService.getTicketsByTechnician(technicianId)));
-        }
-        return ResponseEntity.ok(ApiResponse.success(ticketService.getAllTickets(search)));
+        return ResponseEntity.ok(ApiResponse.success(ticketService.getTickets(search, status, technicianId)));
     }
 
     @GetMapping("/{id}")

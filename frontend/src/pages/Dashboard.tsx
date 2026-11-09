@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { Link, useOutletContext } from 'react-router-dom';
 import {
   Wrench,
@@ -33,6 +33,7 @@ export const Dashboard: React.FC = () => {
 
   const isTechnician = hasRole('TECHNICIAN') && !hasRole('ADMIN');
   const isReceptionist = hasRole('RECEPTIONIST') && !hasRole('ADMIN');
+  const [techFilter, setTechFilter] = useState<'ONGOING' | 'READY' | 'ALL'>('ONGOING');
 
   useEffect(() => {
     fetchStats();
@@ -125,9 +126,21 @@ export const Dashboard: React.FC = () => {
     return `Executive business & workshop overview • ${todayStr}`;
   };
 
-  const ticketsToDisplay = (isTechnician && stats?.myAssignedTickets && stats.myAssignedTickets.length > 0)
-    ? stats.myAssignedTickets
-    : (stats?.recentTickets || []);
+  const ticketsToDisplay = useMemo(() => {
+    const raw = (isTechnician && stats?.myAssignedTickets && stats.myAssignedTickets.length > 0)
+      ? stats.myAssignedTickets
+      : (stats?.recentTickets || []);
+
+    if (!isTechnician) return raw;
+
+    if (techFilter === 'ONGOING') {
+      return raw.filter((t) => t.status !== 'DELIVERED' && t.status !== 'CANCELLED' && t.status !== 'READY_FOR_DELIVERY');
+    }
+    if (techFilter === 'READY') {
+      return raw.filter((t) => t.status === 'READY_FOR_DELIVERY');
+    }
+    return raw;
+  }, [isTechnician, stats, techFilter]);
 
   return (
     <>
@@ -449,10 +462,40 @@ export const Dashboard: React.FC = () => {
                   : 'Latest customer devices serviced on the workbench'}
               </p>
             </div>
-            <Link to="/tickets" className="btn btn-outline btn-sm">
-              <span>View All</span>
-              <ArrowRight size={14} />
-            </Link>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              {isTechnician && (
+                <div className="segmented-control" style={{ margin: 0 }}>
+                  <button
+                    type="button"
+                    className={`segmented-btn ${techFilter === 'ONGOING' ? 'active' : ''}`}
+                    style={{ fontSize: '0.74rem', padding: '3px 8px' }}
+                    onClick={() => setTechFilter('ONGOING')}
+                  >
+                    Ongoing Bench Jobs
+                  </button>
+                  <button
+                    type="button"
+                    className={`segmented-btn ${techFilter === 'READY' ? 'active' : ''}`}
+                    style={{ fontSize: '0.74rem', padding: '3px 8px' }}
+                    onClick={() => setTechFilter('READY')}
+                  >
+                    Ready for Pickup
+                  </button>
+                  <button
+                    type="button"
+                    className={`segmented-btn ${techFilter === 'ALL' ? 'active' : ''}`}
+                    style={{ fontSize: '0.74rem', padding: '3px 8px' }}
+                    onClick={() => setTechFilter('ALL')}
+                  >
+                    All My Jobs
+                  </button>
+                </div>
+              )}
+              <Link to="/tickets" className="btn btn-outline btn-sm">
+                <span>View All Tickets</span>
+                <ArrowRight size={14} />
+              </Link>
+            </div>
           </div>
 
           {/* Desktop Table View */}

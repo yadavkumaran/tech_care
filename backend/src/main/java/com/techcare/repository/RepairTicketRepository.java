@@ -45,6 +45,12 @@ public interface RepairTicketRepository extends JpaRepository<RepairTicket, Long
     @Query("SELECT t FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status NOT IN ('DELIVERED', 'CANCELLED') ORDER BY t.createdAt DESC")
     List<RepairTicket> findRecentAssignedTickets(@Param("techId") Long techId, org.springframework.data.domain.Pageable pageable);
 
+    @Query("SELECT t FROM RepairTicket t WHERE t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED') ORDER BY t.createdAt DESC")
+    List<RepairTicket> findOngoingTickets();
+
+    @Query("SELECT t FROM RepairTicket t WHERE t.assignedTechnician.id = :techId AND t.status NOT IN ('DELIVERED', 'CANCELLED', 'REJECTED') ORDER BY t.createdAt DESC")
+    List<RepairTicket> findOngoingTicketsByTechnicianId(@Param("techId") Long techId);
+
     @Query("SELECT t FROM RepairTicket t WHERE " +
            "LOWER(t.ticketNumber) LIKE LOWER(CONCAT('%', :query, '%')) OR " +
            "LOWER(t.customer.fullName) LIKE LOWER(CONCAT('%', :query, '%')) OR " +

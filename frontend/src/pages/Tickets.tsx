@@ -52,7 +52,8 @@ export const Tickets: React.FC = () => {
   const [tickets, setTickets] = useState<RepairTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
+  const [selectedStatus, setSelectedStatus] = useState<string>('ONGOING');
+  const [selectedTechFilter, setSelectedTechFilter] = useState<number | 'ALL' | 'UNASSIGNED'>('ALL');
 
   // Intake Modal State
   const [showIntakeModal, setShowIntakeModal] = useState(false);
@@ -110,22 +111,37 @@ export const Tickets: React.FC = () => {
   const [consumingPart, setConsumingPart] = useState(false);
 
   const { user, hasRole } = useAuth();
+  const isTechnician = hasRole('TECHNICIAN') && !hasRole('ADMIN');
   const { toast } = useToast();
   const { broadcastLocalUpdate } = useSync();
   const outletContext = useOutletContext<LayoutContextType | null>();
   const navigate = useNavigate();
 
+  // If user is a technician, default technician filter to their own account
+  useEffect(() => {
+    if (isTechnician && user?.id) {
+      setSelectedTechFilter(user.id);
+    }
+  }, [user?.id, isTechnician]);
+
   useEffect(() => {
     fetchTickets(true);
     loadTechsAndInventory();
-  }, [selectedStatus]);
+  }, [selectedStatus, selectedTechFilter]);
 
   const fetchTickets = async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
       let url = '/tickets';
+      const params: string[] = [];
       if (selectedStatus !== 'ALL') {
-        url += `?status=${selectedStatus}`;
+        params.push(`status=${selectedStatus}`);
+      }
+      if (typeof selectedTechFilter === 'number') {
+        params.push(`technicianId=${selectedTechFilter}`);
+      }
+      if (params.length > 0) {
+        url += `?${params.join('&')}`;
       }
       const res = await api.get<ApiResponse<RepairTicket[]>>(url);
       if (res.data.success) {
@@ -525,14 +541,41 @@ export const Tickets: React.FC = () => {
   };
 
   const filteredTickets = tickets.filter((t) => {
-    const q = searchTerm.toLowerCase();
-    return (
-      t.ticketNumber.toLowerCase().includes(q) ||
-      (t.customer?.fullName || '').toLowerCase().includes(q) ||
-      (t.customer?.phone || '').includes(q) ||
-      (t.device?.modelName || '').toLowerCase().includes(q) ||
-      (t.device?.brand || '').toLowerCase().includes(q)
-    );
+    // 1. Status Filter reinforcement
+    if (selectedStatus === 'ONGOING') {
+      if (t.status === 'DELIVERED' || t.status === 'CANCELLED' || t.status === 'REJECTED') {
+        return false;
+      }
+    } else if (selectedStatus !== 'ALL') {
+      if (t.status !== selectedStatus) {
+        return false;
+      }
+    }
+
+    // 2. Technician Filter reinforcement
+    if (selectedTechFilter === 'UNASSIGNED') {
+      if (t.assignedTechnician) return false;
+    } else if (typeof selectedTechFilter === 'number') {
+      if (!t.assignedTechnician || t.assignedTechnician.id !== selectedTechFilter) {
+        return false;
+      }
+    }
+
+    // 3. Search query
+    const q = searchTerm.toLowerCase().trim();
+    if (q) {
+      return (
+        t.ticketNumber.toLowerCase().includes(q) ||
+        (t.customer?.fullName || '').toLowerCase().includes(q) ||
+        (t.customer?.phone || '').includes(q) ||
+        (t.device?.modelName || '').toLowerCase().includes(q) ||
+        (t.device?.brand || '').toLowerCase().includes(q) ||
+        (t.device?.serialNumber || '').toLowerCase().includes(q) ||
+        (t.assignedTechnician?.fullName || '').toLowerCase().includes(q)
+      );
+    }
+
+    return true;
   });
 
   const getStatusBadge = (status: TicketStatus) => {
@@ -618,16 +661,15 @@ export const Tickets: React.FC = () => {
   };
 
   const statusFilterTabs = [
-    { key: 'ALL', label: 'All' },
-    { key: 'RECEIVED', label: 'Received' },
+    { key: 'ONGOING', label: '⚡ Ongoing Repairs' },
+    { key: 'READY_FOR_DELIVERY', label: 'Ready for Pickup' },
+    { key: 'DELIVERED', label: 'Delivered (Completed)' },
+    { key: 'ALL', label: 'All Tickets' },
+    { key: 'IN_PROGRESS', label: 'In Progress' },
     { key: 'DIAGNOSING', label: 'Diagnosing' },
+    { key: 'WAITING_FOR_PARTS', label: 'Waiting for Parts' },
     { key: 'ESTIMATION_PENDING', label: 'Quote Pending' },
     { key: 'APPROVED', label: 'Approved' },
-    { key: 'WAITING_FOR_PARTS', label: 'Parts Wait' },
-    { key: 'ON_HOLD', label: 'On Hold' },
-    { key: 'IN_PROGRESS', label: 'In Progress' },
-    { key: 'READY_FOR_DELIVERY', label: 'Ready' },
-    { key: 'DELIVERED', label: 'Delivered' },
     { key: 'CANCELLED', label: 'Cancelled' },
   ];
 
@@ -665,7 +707,7 @@ export const Tickets: React.FC = () => {
         </div>
 
         {/* Status Filter Segmented Controls */}
-        <div style={{ marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
+        <div style={{ marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
           <div className="segmented-control">
             {statusFilterTabs.map((tab) => (
               <button
@@ -676,6 +718,95 @@ export const Tickets: React.FC = () => {
                 {tab.label}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* Technician Filter Bar & Quick Counters */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: 12,
+            marginBottom: 16,
+            padding: '10px 14px',
+            background: 'var(--bg-surface-subtle)',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-default)',
+          }}
+        >
+          {/* Left: Role-Aware Technician Filter */}
+          {isTechnician ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.80rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Wrench size={14} color="var(--primary)" />
+                Filter by Assignment:
+              </span>
+              <div className="segmented-control" style={{ margin: 0 }}>
+                <button
+                  type="button"
+                  className={`segmented-btn ${selectedTechFilter === user?.id ? 'active' : ''}`}
+                  onClick={() => setSelectedTechFilter(user?.id || 'ALL')}
+                >
+                  My Assigned Tickets Alone
+                </button>
+                <button
+                  type="button"
+                  className={`segmented-btn ${selectedTechFilter === 'ALL' ? 'active' : ''}`}
+                  onClick={() => setSelectedTechFilter('ALL')}
+                >
+                  All Technicians' Tickets
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Wrench size={14} color="var(--primary)" />
+                Assigned Technician:
+              </span>
+              <select
+                className="form-control"
+                style={{ width: 'auto', minWidth: 190, height: 34, fontSize: '0.82rem', padding: '0 10px' }}
+                value={selectedTechFilter}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'ALL' || val === 'UNASSIGNED') {
+                    setSelectedTechFilter(val);
+                  } else {
+                    setSelectedTechFilter(Number(val));
+                  }
+                }}
+              >
+                <option value="ALL">All Technicians ({technicians.length})</option>
+                <option value="UNASSIGNED">Unassigned Tickets</option>
+                {technicians.map((tech) => (
+                  <option key={tech.id} value={tech.id}>
+                    {tech.fullName}
+                  </option>
+                ))}
+              </select>
+              {user?.id && (
+                <button
+                  type="button"
+                  className={`btn btn-xs ${selectedTechFilter === user.id ? 'btn-primary' : 'btn-outline'}`}
+                  onClick={() => setSelectedTechFilter(selectedTechFilter === user.id ? 'ALL' : user.id)}
+                >
+                  My Tickets Alone
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Right: Active Ticket Count Summary */}
+          <div style={{ fontSize: '0.80rem', color: 'var(--text-secondary)' }}>
+            Showing <strong>{filteredTickets.length}</strong>{' '}
+            <span style={{ color: selectedStatus === 'ONGOING' ? 'var(--primary)' : 'inherit', fontWeight: 600 }}>
+              {selectedStatus === 'ONGOING' ? 'ongoing' : selectedStatus.toLowerCase().replace(/_/g, ' ')}
+            </span>{' '}
+            ticket{filteredTickets.length === 1 ? '' : 's'}
+            {selectedTechFilter === user?.id ? ' (assigned to you)' : ''}
           </div>
         </div>
 

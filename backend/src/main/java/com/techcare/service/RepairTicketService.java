@@ -43,6 +43,47 @@ public class RepairTicketService {
     private final SyncNotificationService syncService;
 
     @Transactional(readOnly = true)
+    public List<RepairTicket> getTickets(String search, String status, Long technicianId) {
+        List<RepairTicket> list;
+
+        if (status != null && (status.equalsIgnoreCase("ONGOING") || status.equalsIgnoreCase("ACTIVE"))) {
+            if (technicianId != null) {
+                list = ticketRepository.findOngoingTicketsByTechnicianId(technicianId);
+            } else {
+                list = ticketRepository.findOngoingTickets();
+            }
+        } else if (status != null && !status.equalsIgnoreCase("ALL")) {
+            try {
+                TicketStatus ts = TicketStatus.valueOf(status.toUpperCase());
+                list = ticketRepository.findByStatus(ts);
+                if (technicianId != null) {
+                    list = list.stream()
+                            .filter(t -> t.getAssignedTechnician() != null && t.getAssignedTechnician().getId().equals(technicianId))
+                            .toList();
+                }
+            } catch (IllegalArgumentException e) {
+                list = ticketRepository.findAll();
+            }
+        } else if (technicianId != null) {
+            list = ticketRepository.findByAssignedTechnicianId(technicianId);
+        } else {
+            list = ticketRepository.findAll();
+        }
+
+        if (search != null && !search.trim().isEmpty()) {
+            String q = search.trim().toLowerCase();
+            list = list.stream()
+                    .filter(t -> t.getTicketNumber().toLowerCase().contains(q) ||
+                            (t.getCustomer() != null && t.getCustomer().getFullName().toLowerCase().contains(q)) ||
+                            (t.getCustomer() != null && t.getCustomer().getPhone().contains(q)) ||
+                            (t.getDevice() != null && t.getDevice().getModelName().toLowerCase().contains(q)))
+                    .toList();
+        }
+
+        return list;
+    }
+
+    @Transactional(readOnly = true)
     public List<RepairTicket> getAllTickets(String search) {
         if (search != null && !search.trim().isEmpty()) {
             return ticketRepository.searchTickets(search.trim());
