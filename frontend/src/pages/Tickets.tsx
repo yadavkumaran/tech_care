@@ -38,6 +38,7 @@ import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { Modal } from '../components/ui/Modal';
 import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
+import { DEVICE_TYPES, formatDeviceType, getDeviceIcon } from '../utils/deviceUtils';
 import api from '../api/client';
 import {
   ApiResponse,
@@ -1023,11 +1024,15 @@ export const Tickets: React.FC = () => {
                       </td>
                       <td>
                         <div style={{ fontWeight: 500, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Laptop size={14} color="var(--text-tertiary)" />
+                          {getDeviceIcon(t.device?.deviceType, 15)}
                           <span>{t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}</span>
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-                          SN: {t.device?.serialNumber || 'N/A'}
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                          <span style={{ fontWeight: 600, color: 'var(--text-secondary)' }}>
+                            {formatDeviceType(t.device?.deviceType)}
+                          </span>
+                          <span>•</span>
+                          <span>SN: {t.device?.serialNumber || 'N/A'}</span>
                         </div>
                       </td>
                       <td>{getPriorityBadge(t.priority)}</td>
@@ -1235,11 +1240,12 @@ export const Tickets: React.FC = () => {
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
                       Device
                     </div>
-                    <div style={{ fontWeight: 500, color: 'var(--text-primary)', marginTop: 2 }}>
-                      {t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}
+                    <div style={{ fontWeight: 500, color: 'var(--text-primary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {getDeviceIcon(t.device?.deviceType, 13)}
+                      <span>{t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}</span>
                     </div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)' }}>
-                      SN: {t.device?.serialNumber || 'N/A'}
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 2 }}>
+                      {formatDeviceType(t.device?.deviceType)} • SN: {t.device?.serialNumber || 'N/A'}
                     </div>
                   </div>
 
@@ -1518,7 +1524,7 @@ export const Tickets: React.FC = () => {
                 >
                   {devices.map((d) => (
                     <option key={d.id} value={d.id}>
-                      {d.brand} {d.modelName} ({d.deviceType}) — SN: {d.serialNumber || 'N/A'}
+                      {d.brand} {d.modelName} ({formatDeviceType(d.deviceType)}) — SN: {d.serialNumber || 'N/A'}
                     </option>
                   ))}
                 </select>
@@ -1552,11 +1558,11 @@ export const Tickets: React.FC = () => {
                       value={newDevType}
                       onChange={(e) => setNewDevType(e.target.value)}
                     >
-                      <option value="LAPTOP">Laptop</option>
-                      <option value="DESKTOP">Desktop</option>
-                      <option value="ALL_IN_ONE">All-in-One PC</option>
-                      <option value="PRINTER">Printer / Peripheral</option>
-                      <option value="CUSTOM_PC">Custom PC / Workstation</option>
+                      {DEVICE_TYPES.map((dt) => (
+                        <option key={dt.value} value={dt.value}>
+                          {dt.badge} — {dt.label}
+                        </option>
+                      ))}
                     </select>
                   </div>
                   <div className="form-group">
@@ -2474,7 +2480,7 @@ export const Tickets: React.FC = () => {
                   {quotationTicket.device?.brand} {quotationTicket.device?.modelName}
                 </div>
                 <div style={{ fontSize: '0.80rem', color: '#334155', marginTop: 2 }}>
-                  Type: {quotationTicket.device?.deviceType} • SN: {quotationTicket.device?.serialNumber || 'N/A'}
+                  Type: {formatDeviceType(quotationTicket.device?.deviceType)} • SN: {quotationTicket.device?.serialNumber || 'N/A'}
                 </div>
                 <div style={{ fontSize: '0.80rem', color: '#334155' }}>
                   Reported Issue: <em>{quotationTicket.problemReported}</em>

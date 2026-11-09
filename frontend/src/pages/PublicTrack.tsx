@@ -21,6 +21,7 @@ import {
 import api from '../api/client';
 import { ApiResponse, TicketStatus, TicketPriority } from '../types';
 import { launchRazorpayCheckout, RazorpayOrderData } from '../utils/razorpay';
+import { formatDeviceType } from '../utils/deviceUtils';
 
 interface PublicTicket {
   ticketNumber: string;
@@ -282,7 +283,7 @@ export const PublicTrack: React.FC = () => {
                 <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a' }}>
                   {ticket.deviceBrand} {ticket.deviceModel}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Type: {ticket.deviceType}</div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>Type: {formatDeviceType(ticket.deviceType)}</div>
               </div>
               <div>
                 <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600 }}>Customer Account</div>

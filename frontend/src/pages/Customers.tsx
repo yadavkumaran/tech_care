@@ -20,6 +20,7 @@ import { Modal } from '../components/ui/Modal';
 import { Badge } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
+import { DEVICE_TYPES, formatDeviceType, getDeviceIcon } from '../utils/deviceUtils';
 import api from '../api/client';
 import { ApiResponse, Customer, CustomerDevice } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -694,11 +695,11 @@ export const Customers: React.FC = () => {
                     value={devType}
                     onChange={(e) => setDevType(e.target.value)}
                   >
-                    <option value="LAPTOP">Laptop</option>
-                    <option value="DESKTOP">Desktop</option>
-                    <option value="ALL_IN_ONE">All-in-One PC</option>
-                    <option value="PRINTER">Printer / Peripheral</option>
-                    <option value="CUSTOM_PC">Custom PC / Workstation</option>
+                    {DEVICE_TYPES.map((dt) => (
+                      <option key={dt.value} value={dt.value}>
+                        {dt.badge} — {dt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
                 <div className="form-group">
@@ -809,11 +810,11 @@ export const Customers: React.FC = () => {
                   >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Laptop size={16} color="var(--primary)" />
+                        {getDeviceIcon(d.deviceType, 16, 'var(--primary)')}
                         <span>{d.brand} {d.modelName}</span>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Badge variant="info">{d.deviceType}</Badge>
+                        <Badge variant="info">{formatDeviceType(d.deviceType)}</Badge>
                         {(hasRole('ADMIN') || hasRole('RECEPTIONIST')) && (
                           <button
                             type="button"

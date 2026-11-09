@@ -21,6 +21,7 @@ import { StatCard } from '../components/ui/StatCard';
 import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonStatCard, SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
+import { formatDeviceType, getDeviceIcon } from '../utils/deviceUtils';
 import api from '../api/client';
 import { ApiResponse, DashboardStats } from '../types';
 import { LayoutContextType } from '../components/Layout';
@@ -598,13 +599,13 @@ export const Dashboard: React.FC = () => {
                               color: 'var(--text-primary)',
                             }}
                           >
-                            <Laptop size={14} color="var(--text-tertiary)" />
+                            {getDeviceIcon(t.device?.deviceType, 15)}
                             <span>
                               {t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}
                             </span>
                           </div>
                           <div style={{ fontSize: '0.75rem', color: 'var(--text-tertiary)' }}>
-                            {t.device?.deviceType || 'Hardware'}
+                            {formatDeviceType(t.device?.deviceType)}
                           </div>
                         </td>
                         <td
@@ -707,8 +708,12 @@ export const Dashboard: React.FC = () => {
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
                         Device
                       </div>
-                      <div style={{ fontWeight: 500, color: 'var(--text-primary)', marginTop: 2 }}>
-                        {t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}
+                      <div style={{ fontWeight: 500, color: 'var(--text-primary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {getDeviceIcon(t.device?.deviceType, 13)}
+                        <span>{t.device ? `${t.device.brand} ${t.device.modelName}` : 'Equipment'}</span>
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 1 }}>
+                        {formatDeviceType(t.device?.deviceType)}
                       </div>
                     </div>
                     <div>
