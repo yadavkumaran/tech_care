@@ -4,7 +4,14 @@ export const CLOUD_BACKEND_URL = 'https://techcare-backend-6uc4.onrender.com';
 
 export const getApiBaseUrl = () => {
   // 1. User manual override stored in localStorage
-  const customServer = typeof localStorage !== 'undefined' ? localStorage.getItem('techcare_server_url') : null;
+  let customServer = typeof localStorage !== 'undefined' ? localStorage.getItem('techcare_server_url') : null;
+  // Automatically purge obsolete backend URLs without the -6uc4 slug
+  if (customServer && customServer.includes('techcare-backend.onrender.com') && !customServer.includes('techcare-backend-6uc4')) {
+    try {
+      localStorage.removeItem('techcare_server_url');
+    } catch {}
+    customServer = null;
+  }
   if (customServer && customServer.trim()) {
     return `${customServer.trim().replace(/\/+$/, '')}/api`;
   }

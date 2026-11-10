@@ -12,7 +12,18 @@ export const Login: React.FC = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showServerConfig, setShowServerConfig] = useState(false);
-  const [serverUrlInput, setServerUrlInput] = useState(() => localStorage.getItem('techcare_server_url') || '');
+  const [serverUrlInput, setServerUrlInput] = useState(() => {
+    try {
+      const saved = localStorage.getItem('techcare_server_url') || '';
+      if (saved.includes('techcare-backend.onrender.com') && !saved.includes('techcare-backend-6uc4')) {
+        localStorage.removeItem('techcare_server_url');
+        return '';
+      }
+      return saved;
+    } catch {
+      return '';
+    }
+  });
   const [serverSuccess, setServerSuccess] = useState('');
 
   const { login } = useAuth();
@@ -329,7 +340,7 @@ export const Login: React.FC = () => {
               onClick={() => setShowServerConfig(!showServerConfig)}
             >
               <Settings size={13} />
-              <span>Backend Server: <strong>{localStorage.getItem('techcare_server_url') || getApiBaseUrl().replace(/\/api$/, '') || 'Auto (/api)'}</strong></span>
+              <span>Backend Server: <strong>{getApiBaseUrl().replace(/\/api$/, '')}</strong></span>
             </button>
 
             {serverSuccess && (
