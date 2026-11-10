@@ -24,7 +24,49 @@ export interface User {
   fullName: string;
   phone?: string;
   role: Role;
+  baseSalary?: number;
   isActive: boolean;
+}
+
+export interface SalarySettlement {
+  id: number;
+  staffId: number;
+  staffName: string;
+  staffEmail: string;
+  staffPhone?: string;
+  staffRole: string;
+  salaryMonth: string;
+  baseSalary: number;
+  bonus: number;
+  deductions: number;
+  netSalary: number;
+  paymentMethod: string;
+  transactionRef?: string;
+  paymentDate: string;
+  status: string;
+  notes?: string;
+  settledById?: number;
+  settledByName?: string;
+  createdAt: string;
+}
+
+export interface FinancialAnalytics {
+  period: 'TODAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'ALL_TIME';
+  startDate: string;
+  endDate: string;
+  totalRevenue: number;
+  serviceRevenue: number;
+  hardwareRevenue: number;
+  cogs: number;
+  grossProfit: number;
+  grossMarginPercent: number;
+  salaryExpenses: number;
+  purchaseExpenses: number;
+  netProfit: number;
+  netMarginPercent: number;
+  totalReceivables: number;
+  totalInvoices: number;
+  settledSalariesCount: number;
 }
 
 export interface AuthResponse {

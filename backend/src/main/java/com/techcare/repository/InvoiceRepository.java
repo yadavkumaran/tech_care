@@ -31,5 +31,12 @@ public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
 
     // Invoices issued on a given date (for today's billing revenue calculation)
     List<Invoice> findByInvoiceDate(LocalDate invoiceDate);
+
+    // Invoices with items fetched for financial & profit analytics
+    @Query("SELECT DISTINCT i FROM Invoice i LEFT JOIN FETCH i.items it LEFT JOIN FETCH it.item WHERE i.invoiceDate BETWEEN :start AND :end AND i.status != com.techcare.entity.enums.InvoiceStatus.CANCELLED")
+    List<Invoice> findInvoicesWithItemsBetween(@Param("start") LocalDate start, @Param("end") LocalDate end);
+
+    @Query("SELECT DISTINCT i FROM Invoice i LEFT JOIN FETCH i.items it LEFT JOIN FETCH it.item WHERE i.status != com.techcare.entity.enums.InvoiceStatus.CANCELLED")
+    List<Invoice> findAllInvoicesWithItems();
 }
 

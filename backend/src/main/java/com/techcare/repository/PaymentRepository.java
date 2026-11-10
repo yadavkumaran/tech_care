@@ -24,5 +24,8 @@ public interface PaymentRepository extends JpaRepository<Payment, Long> {
     // Calculate sum of payments collected within a date/time window
     @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p WHERE p.paymentDate BETWEEN :start AND :end")
     BigDecimal sumPaymentsBetween(@Param("start") LocalDateTime start, @Param("end") LocalDateTime end);
+
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM Payment p")
+    BigDecimal sumAllPayments();
 }
 

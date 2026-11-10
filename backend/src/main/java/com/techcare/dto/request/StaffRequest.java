@@ -3,6 +3,8 @@ package com.techcare.dto.request;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.math.BigDecimal;
+
 @Data
 public class StaffRequest {
 
@@ -21,6 +23,8 @@ public class StaffRequest {
 
     @NotBlank(message = "Role is required (ADMIN, RECEPTIONIST, TECHNICIAN)")
     private String role;
+
+    private BigDecimal baseSalary = BigDecimal.ZERO;
 
     private Boolean isActive = true;
 }

@@ -1,6 +1,9 @@
 package com.techcare.service;
 
 import com.techcare.dto.response.DashboardStatsResponse;
+import com.techcare.dto.response.FinancialAnalyticsResponse;
+import com.techcare.entity.Invoice;
+import com.techcare.entity.InvoiceItem;
 import com.techcare.entity.RepairTicket;
 import com.techcare.entity.User;
 import com.techcare.entity.enums.Role;
@@ -13,9 +16,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 
 @Service
@@ -28,6 +34,8 @@ public class DashboardService {
     private final PaymentRepository paymentRepository;
     private final CustomerRepository customerRepository;
     private final UserRepository userRepository;
+    private final SalarySettlementRepository salaryRepository;
+    private final PurchaseRepository purchaseRepository;
 
     @Transactional(readOnly = true)
     public DashboardStatsResponse getDashboardStats() {
@@ -95,6 +103,103 @@ public class DashboardService {
                 .todayRevenue(todayRevenue != null ? todayRevenue : BigDecimal.ZERO)
                 .totalOutstandingDues(totalOutstanding != null ? totalOutstanding : BigDecimal.ZERO)
                 .recentTickets(recentTickets)
+                .build();
+    }
+
+    @Transactional(readOnly = true)
+    public FinancialAnalyticsResponse getFinancialAnalytics(String periodStr) {
+        String period = (periodStr != null && !periodStr.trim().isEmpty())
+                ? periodStr.trim().toUpperCase()
+                : "THIS_MONTH";
+
+        LocalDate today = LocalDate.now();
+        LocalDate start;
+        LocalDate end = today;
+
+        switch (period) {
+            case "TODAY":
+                start = today;
+                break;
+            case "THIS_WEEK":
+                start = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+                break;
+            case "ALL_TIME":
+                start = LocalDate.of(2020, 1, 1);
+                break;
+            case "THIS_MONTH":
+            default:
+                period = "THIS_MONTH";
+                start = today.withDayOfMonth(1);
+                break;
+        }
+
+        List<Invoice> invoices = period.equals("ALL_TIME")
+                ? invoiceRepository.findAllInvoicesWithItems()
+                : invoiceRepository.findInvoicesWithItemsBetween(start, end);
+
+        BigDecimal totalRevenue = BigDecimal.ZERO;
+        BigDecimal serviceRevenue = BigDecimal.ZERO;
+        BigDecimal hardwareRevenue = BigDecimal.ZERO;
+        BigDecimal cogs = BigDecimal.ZERO;
+
+        for (Invoice inv : invoices) {
+            totalRevenue = totalRevenue.add(inv.getTotalAmount());
+            if (inv.getItems() != null) {
+                for (InvoiceItem item : inv.getItems()) {
+                    BigDecimal itemTotal = item.getTotalPrice() != null ? item.getTotalPrice() : BigDecimal.ZERO;
+                    if ("LABOR".equalsIgnoreCase(item.getItemType())) {
+                        serviceRevenue = serviceRevenue.add(itemTotal);
+                    } else {
+                        hardwareRevenue = hardwareRevenue.add(itemTotal);
+                        if (item.getItem() != null && item.getItem().getCostPrice() != null) {
+                            BigDecimal unitCost = item.getItem().getCostPrice();
+                            BigDecimal itemCost = unitCost.multiply(BigDecimal.valueOf(item.getQuantity() != null ? item.getQuantity() : 1));
+                            cogs = cogs.add(itemCost);
+                        }
+                    }
+                }
+            }
+        }
+
+        BigDecimal grossProfit = totalRevenue.subtract(cogs);
+        double grossMarginPercent = totalRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? (grossProfit.divide(totalRevenue, 4, RoundingMode.HALF_UP).doubleValue() * 100.0)
+                : 0.0;
+
+        BigDecimal salaryExpenses = period.equals("ALL_TIME")
+                ? salaryRepository.sumAllNetSalary()
+                : salaryRepository.sumNetSalaryBetween(start, end);
+        if (salaryExpenses == null) salaryExpenses = BigDecimal.ZERO;
+
+        BigDecimal purchaseExpenses = period.equals("ALL_TIME")
+                ? purchaseRepository.sumAllPurchases()
+                : purchaseRepository.sumPurchasesBetween(start, end);
+        if (purchaseExpenses == null) purchaseExpenses = BigDecimal.ZERO;
+
+        BigDecimal netProfit = grossProfit.subtract(salaryExpenses);
+        double netMarginPercent = totalRevenue.compareTo(BigDecimal.ZERO) > 0
+                ? (netProfit.divide(totalRevenue, 4, RoundingMode.HALF_UP).doubleValue() * 100.0)
+                : 0.0;
+
+        BigDecimal totalReceivables = invoiceRepository.calculateTotalOutstandingReceivables();
+
+        return FinancialAnalyticsResponse.builder()
+                .period(period)
+                .startDate(start)
+                .endDate(end)
+                .totalRevenue(totalRevenue)
+                .serviceRevenue(serviceRevenue)
+                .hardwareRevenue(hardwareRevenue)
+                .cogs(cogs)
+                .grossProfit(grossProfit)
+                .grossMarginPercent(Math.round(grossMarginPercent * 10.0) / 10.0)
+                .salaryExpenses(salaryExpenses)
+                .purchaseExpenses(purchaseExpenses)
+                .netProfit(netProfit)
+                .netMarginPercent(Math.round(netMarginPercent * 10.0) / 10.0)
+                .totalReceivables(totalReceivables != null ? totalReceivables : BigDecimal.ZERO)
+                .totalInvoices(invoices.size())
+                .settledSalariesCount(0)
                 .build();
     }
 }

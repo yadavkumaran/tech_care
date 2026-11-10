@@ -19,6 +19,14 @@ import {
   X,
   Sparkles,
   Lock,
+  IndianRupee,
+  Receipt,
+  Printer,
+  Calendar,
+  Wallet,
+  TrendingDown,
+  Building,
+  CheckCircle2,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Modal } from '../components/ui/Modal';
@@ -26,7 +34,7 @@ import { Badge, BadgeVariant } from '../components/ui/Badge';
 import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
-import { ApiResponse, User } from '../types';
+import { ApiResponse, User, SalarySettlement } from '../types';
 import { useToast } from '../context/ToastContext';
 import { useSync, useRealtimeSync } from '../context/SyncContext';
 import { LayoutContextType } from '../components/Layout';
@@ -34,8 +42,27 @@ import { LayoutContextType } from '../components/Layout';
 export const Staff: React.FC = () => {
   const [staffList, setStaffList] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'STAFF' | 'SALARIES'>('STAFF');
 
-  // Modal State (Create & Edit)
+  // Salary Settlements State
+  const [settlements, setSettlements] = useState<SalarySettlement[]>([]);
+  const [settlementsLoading, setSettlementsLoading] = useState(false);
+  const [showSettleModal, setShowSettleModal] = useState(false);
+  const [payslipModal, setPayslipModal] = useState<SalarySettlement | null>(null);
+
+  // Settle Salary Form State
+  const [settleStaffId, setSettleStaffId] = useState<number | ''>('');
+  const [settleMonth, setSettleMonth] = useState('');
+  const [settleBase, setSettleBase] = useState('0');
+  const [settleBonus, setSettleBonus] = useState('0');
+  const [settleDeductions, setSettleDeductions] = useState('0');
+  const [settleMethod, setSettleMethod] = useState('BANK_TRANSFER');
+  const [settleRef, setSettleRef] = useState('');
+  const [settleDate, setSettleDate] = useState(new Date().toISOString().split('T')[0]);
+  const [settleNotes, setSettleNotes] = useState('');
+  const [isSubmittingSettlement, setIsSubmittingSettlement] = useState(false);
+
+  // Staff Modal State (Create & Edit)
   const [showModal, setShowModal] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
@@ -46,6 +73,7 @@ export const Staff: React.FC = () => {
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [role, setRole] = useState<'ADMIN' | 'RECEPTIONIST' | 'TECHNICIAN'>('TECHNICIAN');
+  const [baseSalary, setBaseSalary] = useState('0');
   const [isActive, setIsActive] = useState(true);
 
   // Button loading state
@@ -104,7 +132,14 @@ export const Staff: React.FC = () => {
 
   useEffect(() => {
     fetchStaff(true);
+    fetchSettlements();
   }, []);
+
+  // Real-time synchronization: refresh staff roster & settlements
+  useRealtimeSync(['STAFF'], () => {
+    fetchStaff(false);
+    fetchSettlements();
+  });
 
   const fetchStaff = async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -120,10 +155,104 @@ export const Staff: React.FC = () => {
     }
   };
 
-  // Real-time synchronization: silently refresh staff roster
-  useRealtimeSync(['STAFF'], () => {
-    fetchStaff(false);
-  });
+  const fetchSettlements = async () => {
+    setSettlementsLoading(true);
+    try {
+      const res = await api.get<ApiResponse<SalarySettlement[]>>('/salaries');
+      if (res.data.success) {
+        setSettlements(res.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load salary settlements', err);
+    } finally {
+      setSettlementsLoading(false);
+    }
+  };
+
+  const getDefaultSalaryMonth = () => {
+    const now = new Date();
+    return now.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+  };
+
+  const openSettleModal = (staff?: User) => {
+    const target = staff || staffList.find((s) => s.isActive) || staffList[0];
+    setSettleStaffId(target ? target.id : '');
+    setSettleBase(target && target.baseSalary ? String(target.baseSalary) : '0');
+    setSettleBonus('0');
+    setSettleDeductions('0');
+    setSettleMonth(getDefaultSalaryMonth());
+    setSettleMethod('BANK_TRANSFER');
+    setSettleRef('');
+    setSettleDate(new Date().toISOString().split('T')[0]);
+    setSettleNotes('');
+    setShowSettleModal(true);
+  };
+
+  const handleStaffSelectInSettle = (staffIdNum: number) => {
+    setSettleStaffId(staffIdNum);
+    const found = staffList.find((s) => s.id === staffIdNum);
+    if (found && found.baseSalary) {
+      setSettleBase(String(found.baseSalary));
+    }
+  };
+
+  const calculatedNetSalary = Math.max(
+    0,
+    Number(settleBase || 0) + Number(settleBonus || 0) - Number(settleDeductions || 0)
+  );
+
+  const handleSettleSalarySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!settleStaffId) {
+      toast.error('Please select an employee');
+      return;
+    }
+    if (!settleMonth.trim()) {
+      toast.error('Please specify the salary month');
+      return;
+    }
+
+    setIsSubmittingSettlement(true);
+    try {
+      const res = await api.post<ApiResponse<SalarySettlement>>('/salaries/settle', {
+        staffId: Number(settleStaffId),
+        salaryMonth: settleMonth.trim(),
+        baseSalary: Number(settleBase || 0),
+        bonus: Number(settleBonus || 0),
+        deductions: Number(settleDeductions || 0),
+        paymentMethod: settleMethod,
+        transactionRef: settleRef.trim() || undefined,
+        paymentDate: settleDate,
+        notes: settleNotes.trim() || undefined,
+      });
+
+      if (res.data.success && res.data.data) {
+        toast.success(`Salary settled successfully for ${res.data.data.staffName}!`);
+        setShowSettleModal(false);
+        fetchSettlements();
+        fetchStaff(false);
+        broadcastLocalUpdate('STAFF', 'UPDATED');
+        setPayslipModal(res.data.data);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to settle salary');
+    } finally {
+      setIsSubmittingSettlement(false);
+    }
+  };
+
+  const handleDeleteSettlement = async (id: number) => {
+    if (window.confirm('Are you sure you want to remove/void this salary disbursement record?')) {
+      try {
+        await api.delete(`/salaries/${id}`);
+        toast.success('Salary record removed');
+        fetchSettlements();
+        broadcastLocalUpdate('STAFF', 'UPDATED');
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Error deleting settlement record');
+      }
+    }
+  };
 
   const openCreateModal = () => {
     setIsEditing(false);
@@ -135,6 +264,7 @@ export const Staff: React.FC = () => {
     setEmail('');
     setPhone('');
     setRole('TECHNICIAN');
+    setBaseSalary('0');
     setIsActive(true);
     setShowModal(true);
   };
@@ -149,6 +279,7 @@ export const Staff: React.FC = () => {
     setEmail(u.email);
     setPhone(u.phone || '');
     setRole(u.role);
+    setBaseSalary(String(u.baseSalary || 0));
     setIsActive(u.isActive);
     setShowModal(true);
   };
@@ -175,6 +306,7 @@ export const Staff: React.FC = () => {
           email,
           phone,
           role,
+          baseSalary: baseSalary ? Number(baseSalary) : 0,
           isActive,
         });
         toast.success('Staff details updated successfully!');
@@ -186,6 +318,7 @@ export const Staff: React.FC = () => {
           email,
           phone,
           role,
+          baseSalary: baseSalary ? Number(baseSalary) : 0,
           isActive,
         });
         toast.success('New staff member added successfully!');
@@ -193,6 +326,7 @@ export const Staff: React.FC = () => {
 
       setShowModal(false);
       fetchStaff();
+      broadcastLocalUpdate('STAFF', 'UPDATED');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Error saving staff member');
     } finally {
@@ -229,284 +363,537 @@ export const Staff: React.FC = () => {
     }
   };
 
+  // Calculations for settlements tab
+  const totalSettledAllTime = settlements.reduce((sum, s) => sum + Number(s.netSalary || 0), 0);
+  const currentMonthStr = getDefaultSalaryMonth();
+  const settledCurrentMonth = settlements
+    .filter((s) => s.salaryMonth.toLowerCase() === currentMonthStr.toLowerCase())
+    .reduce((sum, s) => sum + Number(s.netSalary || 0), 0);
+
   return (
     <>
       <Navbar
-        title="Staff & Technicians"
-        subtitle="Manage bench engineers, receptionists, and administrator access"
+        title="Staff & Payroll Management"
+        subtitle="Manage bench engineers, role access credentials, and employee monthly salary settlements"
         onOpenMobile={outletContext?.openMobileSidebar}
       />
       <div className="page-body">
-        {/* Top Control Bar */}
-        <div className="page-control-bar">
-          <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-            Active team accounts: <b>{staffList.filter((s) => s.isActive).length}</b> of {staffList.length}
-          </div>
+        {/* Navigation Tabs */}
+        <div style={{ display: 'flex', gap: 10, marginBottom: 18, borderBottom: '1px solid var(--border-default)', paddingBottom: 12 }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab('STAFF')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 8,
+              fontSize: '0.86rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: 'none',
+              background: activeTab === 'STAFF' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'STAFF' ? '#fff' : 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <UserIcon size={16} />
+            <span>Staff Directory ({staffList.length})</span>
+          </button>
 
-          <div className="page-actions-group">
-            <button className="btn btn-primary" onClick={openCreateModal}>
-              <Plus size={16} />
-              <span>Add Staff</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('SALARIES')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: 8,
+              fontSize: '0.86rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              border: 'none',
+              background: activeTab === 'SALARIES' ? 'var(--primary)' : 'transparent',
+              color: activeTab === 'SALARIES' ? '#fff' : 'var(--text-secondary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <Receipt size={16} />
+            <span>Salary Settlements & Payslips ({settlements.length})</span>
+          </button>
         </div>
 
-        {/* Desktop Table View */}
-        <div className="card desktop-table-view" style={{ padding: 0 }}>
-          <div className="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Staff Member</th>
-                  <th>Username</th>
-                  <th>Access Role</th>
-                  <th>Contact Info</th>
-                  <th>Account Status</th>
-                  <th style={{ textAlign: 'right' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <SkeletonTableRows count={5} columns={6} />
-                ) : staffList.length > 0 ? (
-                  staffList.map((u) => {
-                    const initials = u.fullName
-                      .split(' ')
-                      .map((n) => n[0])
-                      .join('')
-                      .toUpperCase()
-                      .slice(0, 2);
+        {activeTab === 'STAFF' ? (
+          <>
+            {/* Staff Control Bar */}
+            <div className="page-control-bar">
+              <div style={{ fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
+                Active team accounts: <b>{staffList.filter((s) => s.isActive).length}</b> of {staffList.length}
+              </div>
 
-                    return (
-                      <tr key={u.id}>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div
-                              style={{
-                                width: 34,
-                                height: 34,
-                                borderRadius: 10,
-                                background: u.role === 'ADMIN' ? '#fee2e2' : u.role === 'TECHNICIAN' ? '#e0f2fe' : '#dcfce7',
-                                color: u.role === 'ADMIN' ? '#991b1b' : u.role === 'TECHNICIAN' ? '#075985' : '#166534',
-                                fontSize: '0.82rem',
-                                fontWeight: 700,
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0,
-                              }}
-                            >
-                              {initials}
-                            </div>
-                            <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                              {u.fullName}
-                            </div>
-                          </div>
-                        </td>
-                        <td>
-                          <span
-                            style={{
-                              fontFamily: 'JetBrains Mono, monospace',
-                              fontSize: '0.82rem',
-                              color: 'var(--primary)',
-                            }}
-                          >
-                            @{u.username}
-                          </span>
-                        </td>
-                        <td>
-                          <Badge variant={getRoleVariant(u.role)}>
-                            {u.role}
-                          </Badge>
-                        </td>
-                        <td>
-                          <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <Mail size={13} color="var(--text-tertiary)" />
-                            <span>{u.email}</span>
-                          </div>
-                          {u.phone && (
-                            <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
-                              <Phone size={13} color="var(--text-tertiary)" />
-                              <span className="tabular">{u.phone}</span>
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <Badge variant={u.isActive ? 'success' : 'neutral'}>
-                            {u.isActive ? 'Active' : 'Deactivated'}
-                          </Badge>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                            <button
-                              className="btn btn-outline btn-sm"
-                              title="Edit Staff Member"
-                              onClick={() => openEditModal(u)}
-                            >
-                              <Edit size={13} />
-                              <span>Edit</span>
-                            </button>
-                            <button
-                              className="btn btn-ghost btn-sm"
-                              style={{ color: 'var(--status-danger-text)' }}
-                              title="Deactivate / Delete"
-                              disabled={deletingStaffId === u.id}
-                              onClick={() => handleDelete(u)}
-                            >
-                              {deletingStaffId === u.id ? (
-                                <Loader2 size={13} className="spin-fast" />
-                              ) : (
-                                <Trash2 size={13} />
+              <div className="page-actions-group">
+                <button
+                  className="btn btn-outline"
+                  onClick={() => openSettleModal()}
+                  style={{ gap: 6 }}
+                >
+                  <IndianRupee size={15} />
+                  <span>Settle Salary</span>
+                </button>
+                <button className="btn btn-primary" onClick={openCreateModal}>
+                  <Plus size={16} />
+                  <span>Add Staff</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Desktop Table View */}
+            <div className="card desktop-table-view" style={{ padding: 0 }}>
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Staff Member</th>
+                      <th>Username</th>
+                      <th>Access Role</th>
+                      <th>Monthly Base Salary</th>
+                      <th>Contact Info</th>
+                      <th>Account Status</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {loading ? (
+                      <SkeletonTableRows count={5} columns={7} />
+                    ) : staffList.length > 0 ? (
+                      staffList.map((u) => {
+                        const initials = u.fullName
+                          .split(' ')
+                          .map((n) => n[0])
+                          .join('')
+                          .toUpperCase()
+                          .slice(0, 2);
+
+                        return (
+                          <tr key={u.id}>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div
+                                  style={{
+                                    width: 34,
+                                    height: 34,
+                                    borderRadius: 10,
+                                    background: u.role === 'ADMIN' ? '#fee2e2' : u.role === 'TECHNICIAN' ? '#e0f2fe' : '#dcfce7',
+                                    color: u.role === 'ADMIN' ? '#991b1b' : u.role === 'TECHNICIAN' ? '#075985' : '#166534',
+                                    fontSize: '0.82rem',
+                                    fontWeight: 700,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {initials}
+                                </div>
+                                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                                  {u.fullName}
+                                </div>
+                              </div>
+                            </td>
+                            <td>
+                              <span
+                                style={{
+                                  fontFamily: 'JetBrains Mono, monospace',
+                                  fontSize: '0.82rem',
+                                  color: 'var(--primary)',
+                                }}
+                              >
+                                @{u.username}
+                              </span>
+                            </td>
+                            <td>
+                              <Badge variant={getRoleVariant(u.role)}>
+                                {u.role}
+                              </Badge>
+                            </td>
+                            <td>
+                              <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                                ₹{Number(u.baseSalary || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                <span style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', fontWeight: 400, marginLeft: 4 }}>
+                                  / mo
+                                </span>
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Mail size={13} color="var(--text-tertiary)" />
+                                <span>{u.email}</span>
+                              </div>
+                              {u.phone && (
+                                <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                                  <Phone size={13} color="var(--text-tertiary)" />
+                                  <span className="tabular">{u.phone}</span>
+                                </div>
                               )}
-                            </button>
-                          </div>
+                            </td>
+                            <td>
+                              <Badge variant={u.isActive ? 'success' : 'neutral'}>
+                                {u.isActive ? 'Active' : 'Deactivated'}
+                              </Badge>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  title="Settle Monthly Salary"
+                                  onClick={() => openSettleModal(u)}
+                                  style={{ color: '#059669', borderColor: 'rgba(5, 150, 105, 0.3)' }}
+                                >
+                                  <IndianRupee size={13} />
+                                  <span>Pay Salary</span>
+                                </button>
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  title="Edit Staff Member"
+                                  onClick={() => openEditModal(u)}
+                                >
+                                  <Edit size={13} />
+                                  <span>Edit</span>
+                                </button>
+                                <button
+                                  className="btn btn-ghost btn-sm"
+                                  style={{ color: 'var(--status-danger-text)' }}
+                                  title="Deactivate / Delete"
+                                  disabled={deletingStaffId === u.id}
+                                  onClick={() => handleDelete(u)}
+                                >
+                                  {deletingStaffId === u.id ? (
+                                    <Loader2 size={13} className="spin-fast" />
+                                  ) : (
+                                    <Trash2 size={13} />
+                                  )}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    ) : (
+                      <tr>
+                        <td colSpan={7}>
+                          <EmptyState
+                            icon={UserIcon}
+                            title={loading ? 'Loading staff roster...' : 'No staff members registered'}
+                            description="Add technicians, desk receptionists, and administrators."
+                            actionText={!loading ? 'Add New Staff' : undefined}
+                            onAction={!loading ? openCreateModal : undefined}
+                            actionIcon={<Plus size={15} />}
+                          />
                         </td>
                       </tr>
-                    );
-                  })
-                ) : (
-                  <tr>
-                    <td colSpan={6}>
-                      <EmptyState
-                        icon={UserIcon}
-                        title={loading ? 'Loading staff roster...' : 'No staff members registered'}
-                        description="Add technicians, desk receptionists, and administrators."
-                        actionText={!loading ? 'Add New Staff' : undefined}
-                        onAction={!loading ? openCreateModal : undefined}
-                        actionIcon={<Plus size={15} />}
-                      />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-        {/* Mobile Card View */}
-        <div className="mobile-card-list">
-          {loading ? (
-            <>
-              <SkeletonCard />
-              <SkeletonCard />
-              <SkeletonCard />
-            </>
-          ) : staffList.length > 0 ? (
-            staffList.map((u) => {
-              const initials = u.fullName
-                .split(' ')
-                .map((n) => n[0])
-                .join('')
-                .toUpperCase()
-                .slice(0, 2);
+            {/* Mobile Card View */}
+            <div className="mobile-card-list">
+              {loading ? (
+                <>
+                  <SkeletonCard />
+                  <SkeletonCard />
+                  <SkeletonCard />
+                </>
+              ) : staffList.length > 0 ? (
+                staffList.map((u) => {
+                  const initials = u.fullName
+                    .split(' ')
+                    .map((n) => n[0])
+                    .join('')
+                    .toUpperCase()
+                    .slice(0, 2);
 
-              return (
-                <div key={u.id} className="mobile-data-card">
-                  <div className="mobile-card-header">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div
-                        style={{
-                          width: 36,
-                          height: 36,
-                          borderRadius: 10,
-                          background: u.role === 'ADMIN' ? '#fee2e2' : u.role === 'TECHNICIAN' ? '#e0f2fe' : '#dcfce7',
-                          color: u.role === 'ADMIN' ? '#991b1b' : u.role === 'TECHNICIAN' ? '#075985' : '#166534',
-                          fontSize: '0.84rem',
-                          fontWeight: 700,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                        }}
-                      >
-                        {initials}
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
-                          {u.fullName}
+                  return (
+                    <div key={u.id} className="mobile-data-card">
+                      <div className="mobile-card-header">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div
+                            style={{
+                              width: 36,
+                              height: 36,
+                              borderRadius: 10,
+                              background: u.role === 'ADMIN' ? '#fee2e2' : u.role === 'TECHNICIAN' ? '#e0f2fe' : '#dcfce7',
+                              color: u.role === 'ADMIN' ? '#991b1b' : u.role === 'TECHNICIAN' ? '#075985' : '#166534',
+                              fontSize: '0.84rem',
+                              fontWeight: 700,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {initials}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.92rem' }}>
+                              {u.fullName}
+                            </div>
+                            <span
+                              style={{
+                                fontFamily: 'JetBrains Mono, monospace',
+                                fontSize: '0.74rem',
+                                color: 'var(--primary)',
+                              }}
+                            >
+                              @{u.username}
+                            </span>
+                          </div>
                         </div>
-                        <span
-                          style={{
-                            fontFamily: 'JetBrains Mono, monospace',
-                            fontSize: '0.74rem',
-                            color: 'var(--primary)',
-                          }}
+                        <Badge variant={getRoleVariant(u.role)}>{u.role}</Badge>
+                      </div>
+
+                      <div className="mobile-card-body">
+                        <div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                            Base Salary
+                          </div>
+                          <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginTop: 2, fontSize: '0.9rem' }}>
+                            ₹{Number(u.baseSalary || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })} / mo
+                          </div>
+                        </div>
+
+                        <div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
+                            Phone
+                          </div>
+                          {u.phone ? (
+                            <a
+                              href={`tel:${u.phone}`}
+                              style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600, marginTop: 2, display: 'block' }}
+                            >
+                              <span className="tabular">{u.phone}</span>
+                            </a>
+                          ) : (
+                            <span style={{ color: 'var(--text-tertiary)' }}>—</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mobile-card-footer">
+                        <button
+                          className="btn btn-outline btn-sm"
+                          onClick={() => openSettleModal(u)}
+                          style={{ color: '#059669', borderColor: 'rgba(5, 150, 105, 0.3)', gap: 4 }}
                         >
-                          @{u.username}
-                        </span>
+                          <IndianRupee size={13} />
+                          <span>Pay Salary</span>
+                        </button>
+
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            onClick={() => openEditModal(u)}
+                          >
+                            <Edit size={13} />
+                            <span>Edit</span>
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ color: 'var(--status-danger-text)' }}
+                            disabled={deletingStaffId === u.id}
+                            onClick={() => handleDelete(u)}
+                          >
+                            {deletingStaffId === u.id ? (
+                              <Loader2 size={13} className="spin-fast" />
+                            ) : (
+                              <Trash2 size={13} />
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    <Badge variant={getRoleVariant(u.role)}>{u.role}</Badge>
-                  </div>
-
-                  <div className="mobile-card-body">
-                    <div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
-                        Email
-                      </div>
-                      <div style={{ color: 'var(--text-secondary)', marginTop: 2, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {u.email}
-                      </div>
-                    </div>
-
-                    <div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', textTransform: 'uppercase' }}>
-                        Phone
-                      </div>
-                      {u.phone ? (
-                        <a
-                          href={`tel:${u.phone}`}
-                          style={{ color: 'var(--primary)', textDecoration: 'none', fontWeight: 600, marginTop: 2, display: 'block' }}
-                        >
-                          <span className="tabular">{u.phone}</span>
-                        </a>
-                      ) : (
-                        <span style={{ color: 'var(--text-tertiary)' }}>—</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mobile-card-footer">
-                    <Badge variant={u.isActive ? 'success' : 'neutral'}>
-                      {u.isActive ? 'Active' : 'Deactivated'}
-                    </Badge>
-
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <button
-                        className="btn btn-outline btn-sm"
-                        onClick={() => openEditModal(u)}
-                      >
-                        <Edit size={13} />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        className="btn btn-ghost btn-sm"
-                        style={{ color: 'var(--status-danger-text)' }}
-                        disabled={deletingStaffId === u.id}
-                        onClick={() => handleDelete(u)}
-                      >
-                        {deletingStaffId === u.id ? (
-                          <Loader2 size={13} className="spin-fast" />
-                        ) : (
-                          <Trash2 size={13} />
-                        )}
-                      </button>
-                    </div>
+                  );
+                })
+              ) : (
+                <EmptyState
+                  icon={UserIcon}
+                  title="No staff found"
+                  description="Register technicians and receptionists."
+                  actionText="Add Staff"
+                  onAction={openCreateModal}
+                  actionIcon={<Plus size={15} />}
+                />
+              )}
+            </div>
+          </>
+        ) : (
+          /* SALARY SETTLEMENTS & PAYROLL TAB */
+          <>
+            {/* Top Payroll Summary Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 18 }}>
+              <div className="card" style={{ margin: 0, padding: 18 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Total Settled Payroll</span>
+                  <div style={{ padding: 6, borderRadius: 8, background: '#dcfce7', color: '#166534' }}>
+                    <Wallet size={16} />
                   </div>
                 </div>
-              );
-            })
-          ) : (
-            <EmptyState
-              icon={UserIcon}
-              title="No staff found"
-              description="Register technicians and receptionists."
-              actionText="Add Staff"
-              onAction={openCreateModal}
-              actionIcon={<Plus size={15} />}
-            />
-          )}
-        </div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  ₹{totalSettledAllTime.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', marginTop: 4 }}>
+                  Cumulative all-time staff payroll outflow
+                </div>
+              </div>
+
+              <div className="card" style={{ margin: 0, padding: 18 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Disbursed {currentMonthStr}</span>
+                  <div style={{ padding: 6, borderRadius: 8, background: '#e0f2fe', color: '#075985' }}>
+                    <Calendar size={16} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '1.6rem', fontWeight: 700, color: '#0284c7' }}>
+                  ₹{settledCurrentMonth.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', marginTop: 4 }}>
+                  Settled for the current calendar month
+                </div>
+              </div>
+
+              <div className="card" style={{ margin: 0, padding: 18, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                <div>
+                  <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 600 }}>1-Click Payroll Action</span>
+                  <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', marginTop: 4, fontWeight: 500 }}>
+                    Settle monthly compensation, incentives, and generate official pay slips
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={() => openSettleModal()}
+                  style={{ marginTop: 12, width: '100%', justifyContent: 'center' }}
+                >
+                  <IndianRupee size={15} />
+                  <span>Settle Staff Salary Now</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Settlements Table */}
+            <div className="card" style={{ padding: 0 }}>
+              <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border-default)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.94rem', color: 'var(--text-primary)' }}>
+                  Salary Disbursement History & Payslips
+                </div>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  {settlements.length} settlement records
+                </span>
+              </div>
+
+              <div className="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Staff Member</th>
+                      <th>Pay Month</th>
+                      <th>Base Pay</th>
+                      <th>Bonus / Inc.</th>
+                      <th>Deductions</th>
+                      <th>Net Paid</th>
+                      <th>Payment Method</th>
+                      <th>Payment Date</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {settlementsLoading ? (
+                      <SkeletonTableRows count={5} columns={9} />
+                    ) : settlements.length > 0 ? (
+                      settlements.map((s) => (
+                        <tr key={s.id}>
+                          <td>
+                            <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{s.staffName}</div>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)' }}>{s.staffRole}</span>
+                          </td>
+                          <td>
+                            <Badge variant="info">{s.salaryMonth}</Badge>
+                          </td>
+                          <td>₹{Number(s.baseSalary).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</td>
+                          <td style={{ color: Number(s.bonus) > 0 ? '#10b981' : 'var(--text-tertiary)' }}>
+                            {Number(s.bonus) > 0 ? `+₹${Number(s.bonus).toLocaleString('en-IN')}` : '—'}
+                          </td>
+                          <td style={{ color: Number(s.deductions) > 0 ? '#ef4444' : 'var(--text-tertiary)' }}>
+                            {Number(s.deductions) > 0 ? `-₹${Number(s.deductions).toLocaleString('en-IN')}` : '—'}
+                          </td>
+                          <td>
+                            <span style={{ fontWeight: 700, color: '#059669', fontSize: '0.92rem' }}>
+                              ₹{Number(s.netSalary).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: '0.80rem', fontWeight: 600, color: 'var(--text-primary)' }}>
+                              {s.paymentMethod.replace(/_/g, ' ')}
+                            </span>
+                            {s.transactionRef && (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>
+                                Ref: {s.transactionRef}
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                              {s.paymentDate}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                              <button
+                                type="button"
+                                className="btn btn-outline btn-sm"
+                                onClick={() => setPayslipModal(s)}
+                                title="Print / Download Pay Slip"
+                                style={{ color: 'var(--primary)', borderColor: 'rgba(0, 113, 227, 0.3)' }}
+                              >
+                                <Receipt size={13} />
+                                <span>Payslip</span>
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => handleDeleteSettlement(s.id)}
+                                title="Remove / Void"
+                                style={{ color: 'var(--status-danger-text)' }}
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={9}>
+                          <EmptyState
+                            icon={Receipt}
+                            title="No salary settlements recorded yet"
+                            description="Settle monthly staff payroll to generate printable payslips and track business net profit."
+                            actionText="Settle First Salary"
+                            onAction={() => openSettleModal()}
+                            actionIcon={<Plus size={15} />}
+                          />
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
       </div>
 
       {/* CREATE / EDIT STAFF MODAL */}
@@ -595,138 +982,120 @@ export const Staff: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <label className="form-label" style={{ marginBottom: 0 }}>
-                  {isEditing ? 'New Password (Optional)' : 'Staff Password'} <span className="required-mark">{!isEditing ? '*' : ''}</span>
-                </label>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs"
-                  style={{ color: 'var(--primary)', gap: 4, padding: '2px 6px', fontSize: '0.74rem' }}
-                  onClick={generateStrongPassword}
-                >
-                  <Sparkles size={12} />
-                  <span>Auto-Generate</span>
-                </button>
-              </div>
-
+              <label className="form-label">
+                Monthly Base Salary (₹)
+              </label>
               <div style={{ position: 'relative' }}>
+                <IndianRupee size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
                 <input
-                  type={showPassword ? 'text' : 'password'}
+                  type="number"
+                  step="0.01"
+                  min="0"
                   className="form-control"
-                  required={!isEditing}
-                  placeholder={isEditing ? 'Leave blank to keep current password' : 'Enter strong password (e.g. Staff@2026)'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  style={{ paddingRight: 40, fontFamily: showPassword ? 'inherit' : 'monospace' }}
+                  style={{ paddingLeft: 30 }}
+                  placeholder="e.g. 25000"
+                  value={baseSalary}
+                  onChange={(e) => setBaseSalary(e.target.value)}
                 />
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-xs"
-                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', padding: 6, color: 'var(--text-tertiary)' }}
-                  onClick={() => setShowPassword(!showPassword)}
-                  title={showPassword ? 'Hide password' : 'Show password'}
-                >
-                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
               </div>
-
-              {/* Strict Security Policy Checklist (shown for new staff or when modifying password) */}
-              {(!isEditing || password.length > 0) && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    padding: '10px 12px',
-                    borderRadius: 8,
-                    background: 'var(--bg-surface-subtle)',
-                    border: '1px solid var(--border-default)',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                      Security Requirements:
-                    </span>
-                    <span
-                      style={{
-                        fontSize: '0.72rem',
-                        fontWeight: 700,
-                        color: strengthColor,
-                      }}
-                    >
-                      {strengthLabel} ({passedCriteriaCount}/5)
-                    </span>
-                  </div>
-
-                  {/* Progress Meter Bar */}
-                  <div style={{ height: 4, width: '100%', background: 'var(--border-default)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
-                    <div
-                      style={{
-                        height: '100%',
-                        width: `${(passedCriteriaCount / 5) * 100}%`,
-                        background: strengthColor,
-                        transition: 'width 0.3s ease, background 0.3s ease',
-                      }}
-                    />
-                  </div>
-
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '4px 8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.length ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
-                      {passwordCriteria.length ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
-                      <span>8+ Characters</span>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasUpper ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
-                      {passwordCriteria.hasUpper ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
-                      <span>1+ Uppercase (A-Z)</span>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasLower ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
-                      {passwordCriteria.hasLower ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
-                      <span>1+ Lowercase (a-z)</span>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasNumber ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
-                      {passwordCriteria.hasNumber ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
-                      <span>1+ Number (0-9)</span>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasSpecial ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
-                      {passwordCriteria.hasSpecial ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
-                      <span>1+ Symbol (@#$!%&)</span>
-                    </div>
-                  </div>
-                </div>
-              )}
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 3, display: 'block' }}>
+                Used as default monthly payroll baseline for automated settlements
+              </span>
             </div>
           </div>
 
+          <div className="form-group">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+              <label className="form-label" style={{ marginBottom: 0 }}>
+                {isEditing ? 'New Password (Optional)' : 'Staff Password'} <span className="required-mark">{!isEditing ? '*' : ''}</span>
+              </label>
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                style={{ color: 'var(--primary)', gap: 4, padding: '2px 6px', fontSize: '0.74rem' }}
+                onClick={generateStrongPassword}
+              >
+                <Sparkles size={12} />
+                <span>Auto-Generate</span>
+              </button>
+            </div>
+
+            <div style={{ position: 'relative' }}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                className="form-control"
+                required={!isEditing}
+                placeholder={isEditing ? 'Leave blank to keep current password' : 'Enter strong password (e.g. Staff@2026)'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{ paddingRight: 40 }}
+              />
+              <button
+                type="button"
+                className="btn btn-ghost btn-xs"
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', padding: 4 }}
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+
+            {/* Password security criteria validator */}
+            {(!isEditing || password.length > 0) && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: '10px 12px',
+                  borderRadius: 8,
+                  backgroundColor: 'var(--bg-tertiary, #f8fafc)',
+                  border: '1px solid var(--border-default)',
+                  fontSize: '0.76rem',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>Password Strength:</span>
+                  <span style={{ color: strengthColor, fontWeight: 700 }}>{strengthLabel}</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: passwordCriteria.length ? '#10b981' : '#94a3b8' }}>
+                    {passwordCriteria.length ? <Check size={12} /> : <X size={12} />}
+                    <span>8+ characters</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: passwordCriteria.hasUpper ? '#10b981' : '#94a3b8' }}>
+                    {passwordCriteria.hasUpper ? <Check size={12} /> : <X size={12} />}
+                    <span>1 Upper (A-Z)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: passwordCriteria.hasLower ? '#10b981' : '#94a3b8' }}>
+                    {passwordCriteria.hasLower ? <Check size={12} /> : <X size={12} />}
+                    <span>1 Lower (a-z)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: passwordCriteria.hasNumber ? '#10b981' : '#94a3b8' }}>
+                    {passwordCriteria.hasNumber ? <Check size={12} /> : <X size={12} />}
+                    <span>1 Number (0-9)</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: passwordCriteria.hasSpecial ? '#10b981' : '#94a3b8' }}>
+                    {passwordCriteria.hasSpecial ? <Check size={12} /> : <X size={12} />}
+                    <span>1 Special (@, $, %, !)</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           {isEditing && (
-            <div
-              style={{
-                background: 'var(--bg-surface-subtle)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 'var(--radius-md)',
-                padding: '12px 14px',
-                marginTop: 4,
-              }}
-            >
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', margin: 0 }}>
+            <div className="form-group" style={{ marginTop: 12 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.84rem' }}>
                 <input
                   type="checkbox"
                   checked={isActive}
                   onChange={(e) => setIsActive(e.target.checked)}
                 />
-                <span style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  Active Employee Account
-                </span>
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Account is active</span>
               </label>
-              <p style={{ margin: '4px 0 0 24px', fontSize: '0.76rem', color: 'var(--text-tertiary)' }}>
-                Unchecking preserves ticket history, parts consumption logs, and billing audit trails.
-              </p>
             </div>
           )}
 
-          <div className="modal-footer">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18, borderTop: '1px solid var(--border-default)', paddingTop: 14 }}>
             <button
               type="button"
               className="btn btn-outline"
@@ -734,19 +1103,407 @@ export const Staff: React.FC = () => {
             >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={savingStaff}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={savingStaff || (!isEditing && !isPasswordValid)}
+            >
               {savingStaff ? (
                 <>
                   <Loader2 size={15} className="spin-fast" />
                   <span>Saving...</span>
                 </>
               ) : (
-                <span>{isEditing ? 'Save Changes' : 'Create Staff Member'}</span>
+                <span>{isEditing ? 'Save Changes' : 'Register Staff'}</span>
               )}
             </button>
           </div>
         </form>
       </Modal>
+
+      {/* SETTLE SALARY MODAL */}
+      <Modal
+        isOpen={showSettleModal}
+        onClose={() => setShowSettleModal(false)}
+        title="Settle Employee Monthly Salary"
+        description="Record staff salary disbursement, bonus, deductions, and generate official pay slip"
+        maxWidth={640}
+      >
+        <form onSubmit={handleSettleSalarySubmit}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+            <div className="form-group">
+              <label className="form-label">
+                Select Employee <span className="required-mark">*</span>
+              </label>
+              <select
+                className="form-control"
+                required
+                value={settleStaffId}
+                onChange={(e) => handleStaffSelectInSettle(Number(e.target.value))}
+              >
+                <option value="">-- Choose Employee --</option>
+                {staffList.filter((s) => s.isActive).map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.fullName} ({s.role}) — Base: ₹{Number(s.baseSalary || 0).toLocaleString('en-IN')}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">
+                Salary Month <span className="required-mark">*</span>
+              </label>
+              <input
+                type="text"
+                className="form-control"
+                required
+                placeholder="e.g. November 2026"
+                value={settleMonth}
+                onChange={(e) => setSettleMonth(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+            <div className="form-group">
+              <label className="form-label">Base Salary (₹)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="form-control"
+                required
+                value={settleBase}
+                onChange={(e) => setSettleBase(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Bonus / Incentive (₹)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="form-control"
+                value={settleBonus}
+                onChange={(e) => setSettleBonus(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Deductions (₹)</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className="form-control"
+                value={settleDeductions}
+                onChange={(e) => setSettleDeductions(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Net Salary Live Calculation Card */}
+          <div
+            style={{
+              padding: '12px 16px',
+              borderRadius: 10,
+              background: 'rgba(5, 150, 105, 0.08)',
+              border: '1px solid rgba(5, 150, 105, 0.25)',
+              marginBottom: 12,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
+            <div>
+              <span style={{ fontSize: '0.78rem', color: '#047857', fontWeight: 600 }}>Net Take-Home Payable</span>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                Base (₹{settleBase}) + Bonus (₹{settleBonus}) - Deductions (₹{settleDeductions})
+              </div>
+            </div>
+            <div style={{ fontSize: '1.45rem', fontWeight: 700, color: '#059669' }}>
+              ₹{calculatedNetSalary.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
+            <div className="form-group">
+              <label className="form-label">Payment Method <span className="required-mark">*</span></label>
+              <select
+                className="form-control"
+                value={settleMethod}
+                onChange={(e) => setSettleMethod(e.target.value)}
+              >
+                <option value="BANK_TRANSFER">Bank Transfer (NEFT/IMPS)</option>
+                <option value="UPI">UPI (GPay / PhonePe / Paytm)</option>
+                <option value="CASH">Cash in Hand</option>
+                <option value="CHEQUE">Bank Cheque</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Transaction Ref / UTR #</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="e.g. UTR12345678"
+                value={settleRef}
+                onChange={(e) => setSettleRef(e.target.value)}
+              />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Payment Date</label>
+              <input
+                type="date"
+                className="form-control"
+                required
+                value={settleDate}
+                onChange={(e) => setSettleDate(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Settlement Notes (Optional)</label>
+            <input
+              type="text"
+              className="form-control"
+              placeholder="e.g. Performance bonus included for completing 45 repair tickets on schedule"
+              value={settleNotes}
+              onChange={(e) => setSettleNotes(e.target.value)}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18, borderTop: '1px solid var(--border-default)', paddingTop: 14 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setShowSettleModal(false)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSubmittingSettlement || !settleStaffId}
+            >
+              {isSubmittingSettlement ? (
+                <>
+                  <Loader2 size={15} className="spin-fast" />
+                  <span>Processing Payout...</span>
+                </>
+              ) : (
+                <span>Confirm & Settle ₹{calculatedNetSalary.toLocaleString('en-IN')}</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* OFFICIAL PRINTABLE SALARY PAY SLIP MODAL */}
+      {payslipModal && (
+        <Modal
+          isOpen={Boolean(payslipModal)}
+          onClose={() => setPayslipModal(null)}
+          title={`Salary Pay Slip: ${payslipModal.staffName}`}
+          description={`Payment disbursement voucher for ${payslipModal.salaryMonth}`}
+          maxWidth={680}
+        >
+          <div
+            id="printable-payslip"
+            style={{
+              padding: '24px 28px',
+              background: '#ffffff',
+              borderRadius: 12,
+              border: '1px solid var(--border-default)',
+              color: '#0f172a',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '2px solid #0071e3', paddingBottom: 16, marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0071e3', letterSpacing: '-0.02em' }}>
+                  TECHCARE SERVICE CENTER
+                </div>
+                <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>
+                  123 Tech Park Road, Electronic City, Bangalore • Phone: +91 98765 43210
+                </div>
+                <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
+                  GSTIN: 33AAAAA0000A1Z5 • Email: support@techcare.com
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span
+                  style={{
+                    display: 'inline-block',
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    background: '#e0f2fe',
+                    color: '#0369a1',
+                    fontSize: '0.74rem',
+                    fontWeight: 700,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Salary Pay Slip
+                </span>
+                <div style={{ fontSize: '0.74rem', color: '#64748b', marginTop: 4 }}>
+                  Disbursement ID: #{payslipModal.id.toString().padStart(5, '0')}
+                </div>
+              </div>
+            </div>
+
+            {/* Employee & Period Details */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: 12,
+                padding: '12px 14px',
+                borderRadius: 8,
+                background: '#f8fafc',
+                marginBottom: 18,
+                fontSize: '0.82rem',
+              }}
+            >
+              <div>
+                <span style={{ color: '#64748b' }}>Employee Name:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{payslipModal.staffName}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Role / Designation:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{payslipModal.staffRole}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Salary Period:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{payslipModal.salaryMonth}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Payment Date:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{payslipModal.paymentDate}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Disbursement Mode:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{payslipModal.paymentMethod.replace(/_/g, ' ')}</strong>
+              </div>
+              <div>
+                <span style={{ color: '#64748b' }}>Transaction / UTR:</span>{' '}
+                <strong style={{ color: '#0f172a' }}>{payslipModal.transactionRef || 'N/A'}</strong>
+              </div>
+            </div>
+
+            {/* Earnings & Deductions Breakdown */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 18 }}>
+              {/* Earnings */}
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: '#047857', borderBottom: '1px solid #e2e8f0', paddingBottom: 6, marginBottom: 8 }}>
+                  EARNINGS
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.80rem', marginBottom: 6 }}>
+                  <span style={{ color: '#64748b' }}>Basic Salary:</span>
+                  <span>₹{Number(payslipModal.baseSalary).toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.80rem', marginBottom: 6 }}>
+                  <span style={{ color: '#64748b' }}>Bonus / Incentives:</span>
+                  <span style={{ color: '#059669' }}>+₹{Number(payslipModal.bonus).toFixed(2)}</span>
+                </div>
+                <div style={{ borderTop: '1px dashed #e2e8f0', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.84rem' }}>
+                  <span>Gross Earnings:</span>
+                  <span>₹{(Number(payslipModal.baseSalary) + Number(payslipModal.bonus)).toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Deductions */}
+              <div style={{ border: '1px solid #e2e8f0', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: '#b91c1c', borderBottom: '1px solid #e2e8f0', paddingBottom: 6, marginBottom: 8 }}>
+                  DEDUCTIONS
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.80rem', marginBottom: 6 }}>
+                  <span style={{ color: '#64748b' }}>Advances / Leaves:</span>
+                  <span style={{ color: '#dc2626' }}>-₹{Number(payslipModal.deductions).toFixed(2)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.80rem', marginBottom: 6 }}>
+                  <span style={{ color: '#64748b' }}>Statutory / Taxes:</span>
+                  <span>₹0.00</span>
+                </div>
+                <div style={{ borderTop: '1px dashed #e2e8f0', paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.84rem' }}>
+                  <span>Total Deductions:</span>
+                  <span style={{ color: '#dc2626' }}>-₹{Number(payslipModal.deductions).toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Net Paid Box */}
+            <div
+              style={{
+                background: '#f0fdf4',
+                border: '1.5px solid #86efac',
+                borderRadius: 8,
+                padding: '14px 18px',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: 20,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: '#166534' }}>
+                  NET SALARY DISBURSED
+                </div>
+                <div style={{ fontSize: '0.74rem', color: '#15803d' }}>
+                  Direct settlement credited to employee account
+                </div>
+              </div>
+              <div style={{ fontSize: '1.65rem', fontWeight: 800, color: '#15803d' }}>
+                ₹{Number(payslipModal.netSalary).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+
+            {payslipModal.notes && (
+              <div style={{ fontSize: '0.78rem', color: '#64748b', marginBottom: 20 }}>
+                <strong>Remarks / Notes:</strong> {payslipModal.notes}
+              </div>
+            )}
+
+            {/* Signatures */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginTop: 30, paddingTop: 16, borderTop: '1px solid #e2e8f0', fontSize: '0.78rem' }}>
+              <div>
+                <div style={{ borderBottom: '1px solid #cbd5e1', width: '70%', height: 35 }}></div>
+                <div style={{ marginTop: 6, color: '#64748b' }}>Employee Signature & Date</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ borderBottom: '1px solid #cbd5e1', width: '70%', height: 35, marginLeft: 'auto' }}></div>
+                <div style={{ marginTop: 6, color: '#64748b' }}>
+                  Authorized Signatory {payslipModal.settledByName ? `(${payslipModal.settledByName})` : '(Admin)'}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setPayslipModal(null)}
+            >
+              Close
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => window.print()}
+              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            >
+              <Printer size={15} />
+              <span>Print Pay Slip</span>
+            </button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 };

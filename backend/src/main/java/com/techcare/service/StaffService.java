@@ -65,6 +65,7 @@ public class StaffService {
                 .fullName(request.getFullName().trim())
                 .phone(request.getPhone())
                 .role(role)
+                .baseSalary(request.getBaseSalary() != null ? request.getBaseSalary() : java.math.BigDecimal.ZERO)
                 .isActive(request.getIsActive() != null ? request.getIsActive() : true)
                 .build();
 
@@ -94,6 +95,9 @@ public class StaffService {
         user.setFullName(request.getFullName().trim());
         user.setPhone(request.getPhone());
         user.setRole(role);
+        if (request.getBaseSalary() != null) {
+            user.setBaseSalary(request.getBaseSalary());
+        }
         if (request.getIsActive() != null) {
             user.setIsActive(request.getIsActive());
         }

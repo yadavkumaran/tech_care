@@ -9,12 +9,18 @@ import {
   FileText,
   ArrowRight,
   TrendingUp,
+  TrendingDown,
   Laptop,
   CheckCircle,
   Users,
   AlertCircle,
   Package,
   Flame,
+  Wallet,
+  BarChart3,
+  Layers,
+  ArrowUpRight,
+  DollarSign,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { StatCard } from '../components/ui/StatCard';
@@ -23,7 +29,7 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { SkeletonStatCard, SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import { formatDeviceType, getDeviceIcon } from '../utils/deviceUtils';
 import api from '../api/client';
-import { ApiResponse, DashboardStats } from '../types';
+import { ApiResponse, DashboardStats, FinancialAnalytics } from '../types';
 import { LayoutContextType } from '../components/Layout';
 import { useAuth } from '../context/AuthContext';
 import { useRealtimeSync } from '../context/SyncContext';
@@ -34,17 +40,29 @@ export const Dashboard: React.FC = () => {
   const { user, hasRole } = useAuth();
   const outletContext = useOutletContext<LayoutContextType | null>();
 
-  const isTechnician = hasRole('TECHNICIAN') && !hasRole('ADMIN');
-  const isReceptionist = hasRole('RECEPTIONIST') && !hasRole('ADMIN');
+  const isAdmin = hasRole('ADMIN');
+  const isTechnician = hasRole('TECHNICIAN') && !isAdmin;
+  const isReceptionist = hasRole('RECEPTIONIST') && !isAdmin;
   const [techFilter, setTechFilter] = useState<'ONGOING' | 'READY' | 'ALL'>('ONGOING');
+
+  // Admin Financial Analytics State
+  const [financialPeriod, setFinancialPeriod] = useState<'TODAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'ALL_TIME'>('THIS_MONTH');
+  const [financialData, setFinancialData] = useState<FinancialAnalytics | null>(null);
+  const [financialLoading, setFinancialLoading] = useState(false);
 
   useEffect(() => {
     fetchStats();
-  }, []);
+    if (isAdmin) {
+      fetchFinancialAnalytics(financialPeriod);
+    }
+  }, [isAdmin, financialPeriod]);
 
-  // Real-time synchronization: refresh dashboard metrics when any workshop, billing, or inventory event occurs
-  useRealtimeSync(['TICKET', 'INVOICE', 'PAYMENT', 'INVENTORY'], () => {
+  // Real-time synchronization: refresh dashboard metrics when any workshop, billing, staff, or inventory event occurs
+  useRealtimeSync(['TICKET', 'INVOICE', 'PAYMENT', 'INVENTORY', 'STAFF'], () => {
     fetchStats();
+    if (isAdmin) {
+      fetchFinancialAnalytics(financialPeriod);
+    }
   });
 
   const fetchStats = async () => {
@@ -57,6 +75,22 @@ export const Dashboard: React.FC = () => {
       console.error('Failed to load dashboard statistics', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchFinancialAnalytics = async (period: string) => {
+    setFinancialLoading(true);
+    try {
+      const res = await api.get<ApiResponse<FinancialAnalytics>>(
+        `/dashboard/financial-analytics?period=${period}`
+      );
+      if (res.data.success) {
+        setFinancialData(res.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load financial analytics', err);
+    } finally {
+      setFinancialLoading(false);
     }
   };
 
@@ -354,8 +388,309 @@ export const Dashboard: React.FC = () => {
               </Link>
             </div>
           </div>
+        ) : isAdmin ? (
+          /* EXECUTIVE FINANCIAL PROFIT & COMPARISON ANALYTICS (ADMIN ONLY) */
+          <div style={{ marginBottom: 24 }}>
+            {/* Header with Period Selectors */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: 12,
+                marginBottom: 14,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <BarChart3 size={20} color="var(--primary)" />
+                  <span>Profitability & Financial Comparative Analytics</span>
+                </div>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Real-time net margin tracking, inventory COGS, revenue breakdown, and staff payroll expenses
+                </div>
+              </div>
+
+              {/* Timeframe Filter Switcher */}
+              <div
+                style={{
+                  display: 'flex',
+                  background: 'var(--bg-tertiary, #f1f5f9)',
+                  padding: 3,
+                  borderRadius: 10,
+                  border: '1px solid var(--border-default)',
+                }}
+              >
+                {(['TODAY', 'THIS_WEEK', 'THIS_MONTH', 'ALL_TIME'] as const).map((periodKey) => {
+                  const label =
+                    periodKey === 'TODAY'
+                      ? 'Today'
+                      : periodKey === 'THIS_WEEK'
+                      ? 'This Week'
+                      : periodKey === 'THIS_MONTH'
+                      ? 'This Month'
+                      : 'All Time';
+                  const active = financialPeriod === periodKey;
+                  return (
+                    <button
+                      key={periodKey}
+                      type="button"
+                      onClick={() => setFinancialPeriod(periodKey)}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: 7,
+                        fontSize: '0.76rem',
+                        fontWeight: 600,
+                        border: 'none',
+                        cursor: 'pointer',
+                        background: active ? '#ffffff' : 'transparent',
+                        color: active ? 'var(--primary)' : 'var(--text-secondary)',
+                        boxShadow: active ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 4 Financial KPI Cards */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                gap: 12,
+                marginBottom: 14,
+              }}
+            >
+              {/* Card 1: Gross Revenue */}
+              <div className="card" style={{ margin: 0, padding: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: '0.80rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Total Billed Revenue</span>
+                  <div style={{ padding: 6, borderRadius: 8, background: '#e0f2fe', color: '#0369a1' }}>
+                    <IndianRupee size={16} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '1.55rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  ₹{Number(financialData?.totalRevenue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 5 }}>
+                  Labor: ₹{Number(financialData?.serviceRevenue || 0).toLocaleString('en-IN')} • Parts: ₹{Number(financialData?.hardwareRevenue || 0).toLocaleString('en-IN')}
+                </div>
+              </div>
+
+              {/* Card 2: COGS */}
+              <div className="card" style={{ margin: 0, padding: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: '0.80rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Cost of Goods Sold (COGS)</span>
+                  <div style={{ padding: 6, borderRadius: 8, background: '#fee2e2', color: '#b91c1c' }}>
+                    <Layers size={16} />
+                  </div>
+                </div>
+                <div style={{ fontSize: '1.55rem', fontWeight: 800, color: '#dc2626' }}>
+                  ₹{Number(financialData?.cogs || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 5 }}>
+                  Wholesale acquisition cost of parts & retail items
+                </div>
+              </div>
+
+              {/* Card 3: Gross Profit */}
+              <div className="card" style={{ margin: 0, padding: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: '0.80rem', color: 'var(--text-secondary)', fontWeight: 600 }}>Gross Profit</span>
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      background: '#dcfce7',
+                      color: '#15803d',
+                    }}
+                  >
+                    {financialData?.grossMarginPercent || 0}% margin
+                  </span>
+                </div>
+                <div style={{ fontSize: '1.55rem', fontWeight: 800, color: '#16a34a' }}>
+                  ₹{Number(financialData?.grossProfit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 5 }}>
+                  Revenue minus inventory parts cost (COGS)
+                </div>
+              </div>
+
+              {/* Card 4: Net Take-Home Profit */}
+              <div
+                className="card"
+                style={{
+                  margin: 0,
+                  padding: 16,
+                  border: Number(financialData?.netProfit || 0) >= 0 ? '1.5px solid #86efac' : '1.5px solid #fca5a5',
+                  background: Number(financialData?.netProfit || 0) >= 0 ? 'rgba(5, 150, 105, 0.04)' : 'rgba(239, 68, 68, 0.04)',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: '0.80rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    Net Operating Profit
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '0.72rem',
+                      fontWeight: 700,
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      background: Number(financialData?.netProfit || 0) >= 0 ? '#15803d' : '#dc2626',
+                      color: '#ffffff',
+                    }}
+                  >
+                    {financialData?.netMarginPercent || 0}% net
+                  </span>
+                </div>
+                <div
+                  style={{
+                    fontSize: '1.55rem',
+                    fontWeight: 800,
+                    color: Number(financialData?.netProfit || 0) >= 0 ? '#15803d' : '#dc2626',
+                  }}
+                >
+                  ₹{Number(financialData?.netProfit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                </div>
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-tertiary)', marginTop: 5 }}>
+                  After staff payroll (-₹{Number(financialData?.salaryExpenses || 0).toLocaleString('en-IN')})
+                </div>
+              </div>
+            </div>
+
+            {/* Comparative Breakdown Visual Card */}
+            <div className="card" style={{ margin: 0, padding: 18 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: '0.90rem', color: 'var(--text-primary)' }}>
+                  Financial Breakdown & Expense Comparison ({financialPeriod.replace(/_/g, ' ')})
+                </div>
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <Link
+                    to="/staff"
+                    className="btn btn-outline btn-xs"
+                    style={{ fontSize: '0.76rem', color: 'var(--primary)', borderColor: 'rgba(0, 113, 227, 0.3)', gap: 4 }}
+                  >
+                    <Wallet size={12} />
+                    <span>Manage Staff Salaries</span>
+                  </Link>
+                  <Link
+                    to="/billing"
+                    className="btn btn-outline btn-xs"
+                    style={{ fontSize: '0.76rem', gap: 4 }}
+                  >
+                    <FileText size={12} />
+                    <span>View Customer Invoices</span>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Comparative Progress Bar */}
+              {Number(financialData?.totalRevenue || 0) > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', height: 10, borderRadius: 6, overflow: 'hidden', background: '#e2e8f0', gap: 2 }}>
+                    <div
+                      title={`COGS: ₹${financialData?.cogs}`}
+                      style={{
+                        width: `${Math.min(100, Math.max(5, ((Number(financialData?.cogs || 0) / Number(financialData?.totalRevenue || 1)) * 100)))}%`,
+                        background: '#ef4444',
+                      }}
+                    />
+                    <div
+                      title={`Payroll: ₹${financialData?.salaryExpenses}`}
+                      style={{
+                        width: `${Math.min(100, Math.max(5, ((Number(financialData?.salaryExpenses || 0) / Number(financialData?.totalRevenue || 1)) * 100)))}%`,
+                        background: '#f59e0b',
+                      }}
+                    />
+                    <div
+                      title={`Net Profit: ₹${financialData?.netProfit}`}
+                      style={{
+                        width: `${Math.min(100, Math.max(5, ((Math.max(0, Number(financialData?.netProfit || 0)) / Number(financialData?.totalRevenue || 1)) * 100)))}%`,
+                        background: '#10b981',
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: '0.74rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: '#ef4444', display: 'inline-block' }} />
+                      <span>Parts COGS: ₹{Number(financialData?.cogs || 0).toLocaleString('en-IN')}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: '#f59e0b', display: 'inline-block' }} />
+                      <span>Staff Payroll: ₹{Number(financialData?.salaryExpenses || 0).toLocaleString('en-IN')}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: '#10b981', display: 'inline-block' }} />
+                      <span>Net Profit: ₹{Number(financialData?.netProfit || 0).toLocaleString('en-IN')}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 4 Detail Columns */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                  gap: 12,
+                  paddingTop: 12,
+                  borderTop: '1px solid var(--border-default)',
+                  fontSize: '0.80rem',
+                }}
+              >
+                <div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                    Service Diagnostic Labor
+                  </div>
+                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginTop: 2, fontSize: '0.92rem' }}>
+                    ₹{Number(financialData?.serviceRevenue || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ color: '#059669', fontSize: '0.72rem' }}>100% service margin</div>
+                </div>
+
+                <div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                    Hardware & Parts Markup
+                  </div>
+                  <div style={{ fontWeight: 700, color: 'var(--text-primary)', marginTop: 2, fontSize: '0.92rem' }}>
+                    ₹{(Number(financialData?.hardwareRevenue || 0) - Number(financialData?.cogs || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>
+                    ₹{Number(financialData?.hardwareRevenue || 0).toLocaleString('en-IN')} billed - COGS
+                  </div>
+                </div>
+
+                <div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                    Staff Payroll Settled
+                  </div>
+                  <div style={{ fontWeight: 700, color: '#dc2626', marginTop: 2, fontSize: '0.92rem' }}>
+                    -₹{Number(financialData?.salaryExpenses || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>Settled employee salaries</div>
+                </div>
+
+                <div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem', textTransform: 'uppercase' }}>
+                    Outstanding Receivables
+                  </div>
+                  <div style={{ fontWeight: 700, color: '#b45309', marginTop: 2, fontSize: '0.92rem' }}>
+                    ₹{Number(financialData?.totalReceivables || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                  </div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: '0.72rem' }}>Uncollected customer invoices</div>
+                </div>
+              </div>
+            </div>
+          </div>
         ) : (
-          /* Financial Highlights (Only shown for Admin and Receptionist) */
+          /* Financial Highlights (Shown for Receptionist) */
           <div
             style={{
               display: 'grid',
@@ -389,7 +724,7 @@ export const Dashboard: React.FC = () => {
                     <IndianRupee size={18} />
                   </div>
                   <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                    {isReceptionist ? "Today's Counter Collections" : "Today's Collected Revenue"}
+                    Today's Counter Collections
                   </span>
                 </div>
                 <Badge variant="success">Settled</Badge>
@@ -445,7 +780,7 @@ export const Dashboard: React.FC = () => {
                     <FileText size={18} />
                   </div>
                   <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                    {isReceptionist ? 'Unsettled Delivery Invoices' : 'Outstanding Customer Dues'}
+                    Unsettled Delivery Invoices
                   </span>
                 </div>
                 <Badge variant="warning">Receivables</Badge>

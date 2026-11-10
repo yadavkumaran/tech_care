@@ -8,6 +8,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -43,6 +44,10 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private Role role;
+
+    @Column(name = "base_salary", precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal baseSalary = BigDecimal.ZERO;
 
     @Column(name = "is_active", nullable = false)
     @Builder.Default
