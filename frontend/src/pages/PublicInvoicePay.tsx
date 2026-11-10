@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   CreditCard,
   CheckCircle2,
@@ -9,11 +9,10 @@ import {
   Loader2,
   AlertCircle,
   Cpu,
-  ArrowLeft,
-  ShieldCheck,
-  Calendar,
-  IndianRupee,
+  Search,
+  RefreshCw,
   Phone,
+  ArrowRight,
 } from 'lucide-react';
 import api from '../api/client';
 import { ApiResponse } from '../types';
@@ -51,35 +50,62 @@ interface PublicInvoice {
 }
 
 export const PublicInvoicePay: React.FC = () => {
-  const { invoiceNumber } = useParams<{ invoiceNumber: string }>();
+  const { invoiceNumber: paramInvoiceNumber } = useParams<{ invoiceNumber?: string }>();
+  const navigate = useNavigate();
+
+  const [inputNumber, setInputNumber] = useState(paramInvoiceNumber || '');
   const [invoice, setInvoice] = useState<PublicInvoice | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(paramInvoiceNumber?.trim()));
   const [error, setError] = useState('');
   const [payingOnline, setPayingOnline] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
   useEffect(() => {
-    if (invoiceNumber) {
-      fetchInvoice(invoiceNumber);
+    if (paramInvoiceNumber && paramInvoiceNumber.trim()) {
+      setInputNumber(paramInvoiceNumber.trim());
+      fetchInvoice(paramInvoiceNumber.trim());
+    } else {
+      setLoading(false);
+      setInvoice(null);
     }
-  }, [invoiceNumber]);
+  }, [paramInvoiceNumber]);
 
   const fetchInvoice = async (invNum: string) => {
+    const cleanNum = invNum.trim().toUpperCase();
+    if (!cleanNum) return;
+
     setLoading(true);
     setError('');
+    setPaymentSuccess(false);
+
     try {
       const res = await api.get<ApiResponse<PublicInvoice>>(
-        `/public/invoices/${encodeURIComponent(invNum.trim().toUpperCase())}`
+        `/public/invoices/${encodeURIComponent(cleanNum)}`,
+        { timeout: 15000 }
       );
       if (res.data.success && res.data.data) {
         setInvoice(res.data.data);
       } else {
-        setError('Invoice not found. Please verify the invoice number.');
+        setError(`Invoice #${cleanNum} not found. Please verify the invoice number on your bill.`);
+        setInvoice(null);
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Invoice not found or link has expired.');
+      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+        setError('Connection timed out while reaching server. The server may be waking up, please tap Retry below.');
+      } else {
+        setError(err.response?.data?.message || `Invoice #${cleanNum} not found or link has expired.`);
+      }
+      setInvoice(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (inputNumber.trim()) {
+      navigate(`/pay/${encodeURIComponent(inputNumber.trim().toUpperCase())}`);
+      fetchInvoice(inputNumber.trim());
     }
   };
 
@@ -92,7 +118,8 @@ export const PublicInvoicePay: React.FC = () => {
         {
           invoiceId: invoice.id,
           amount: invoice.balanceAmount,
-        }
+        },
+        { timeout: 15000 }
       );
 
       if (!orderRes.data.success || !orderRes.data.data) {
@@ -113,7 +140,8 @@ export const PublicInvoicePay: React.FC = () => {
                 razorpayPaymentId: paymentRes.razorpay_payment_id,
                 razorpaySignature: paymentRes.razorpay_signature,
                 paymentMethod: 'UPI',
-              }
+              },
+              { timeout: 15000 }
             );
 
             if (verifyRes.data.success) {
@@ -121,7 +149,7 @@ export const PublicInvoicePay: React.FC = () => {
               fetchInvoice(invoice.invoiceNumber);
             }
           } catch (err: any) {
-            alert(err.response?.data?.message || 'Payment verification failed. Please contact support.');
+            alert(err.response?.data?.message || 'Payment verification failed. Please contact counter support.');
           }
         },
         (err) => {
@@ -176,12 +204,79 @@ export const PublicInvoicePay: React.FC = () => {
           </Link>
         </div>
 
+        {/* Search Bar when no invoice or to look up different invoice */}
+        {(!invoice || error) && !loading && (
+          <div
+            style={{
+              background: '#ffffff',
+              borderRadius: 16,
+              border: '1px solid var(--border-default, #e2e8f0)',
+              padding: '28px 24px',
+              marginBottom: 20,
+              boxShadow: '0 4px 14px rgba(0,0,0,0.03)',
+            }}
+          >
+            <h2 style={{ fontSize: '1.15rem', color: 'var(--text-primary, #1e293b)', margin: '0 0 6px' }}>
+              Online Invoice Payment Portal
+            </h2>
+            <p style={{ fontSize: '0.84rem', color: 'var(--text-secondary, #64748b)', margin: '0 0 18px' }}>
+              Enter your TechCare invoice number (e.g. <b>INV-2026-0004</b>) to view your bill and pay securely via UPI, Cards, or NetBanking.
+            </p>
+
+            <form onSubmit={handleSearchSubmit} style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 240, position: 'relative' }}>
+                <Search
+                  size={16}
+                  style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}
+                />
+                <input
+                  type="text"
+                  placeholder="e.g. INV-2026-0004"
+                  value={inputNumber}
+                  onChange={(e) => setInputNumber(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 14px 10px 38px',
+                    borderRadius: 10,
+                    border: '1px solid var(--border-default, #cbd5e1)',
+                    fontFamily: 'monospace',
+                    fontSize: '0.94rem',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="btn btn-primary"
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: 10,
+                  fontSize: '0.88rem',
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                <span>Find Invoice</span>
+                <ArrowRight size={15} />
+              </button>
+            </form>
+          </div>
+        )}
+
         {/* Loading State */}
         {loading && (
           <div style={{ textAlign: 'center', padding: '60px 20px', background: '#fff', borderRadius: 16 }}>
             <Loader2 size={32} className="spin-fast" color="var(--primary, #0071e3)" style={{ margin: '0 auto 12px' }} />
-            <div style={{ color: 'var(--text-secondary, #64748b)', fontSize: '0.9rem' }}>
+            <div style={{ color: 'var(--text-primary, #1e293b)', fontWeight: 600, fontSize: '0.95rem' }}>
               Retrieving invoice details...
+            </div>
+            <div style={{ color: 'var(--text-secondary, #64748b)', fontSize: '0.80rem', marginTop: 4 }}>
+              Connecting to secure payment gateway, please wait a moment
             </div>
           </div>
         )}
@@ -195,11 +290,23 @@ export const PublicInvoicePay: React.FC = () => {
               borderRadius: 16,
               border: '1px solid #fee2e2',
               textAlign: 'center',
+              marginBottom: 20,
             }}
           >
-            <AlertCircle size={40} color="#dc2626" style={{ margin: '0 auto 12px' }} />
-            <h3 style={{ margin: '0 0 8px', color: '#991b1b', fontSize: '1.1rem' }}>Invoice Not Found</h3>
-            <p style={{ margin: 0, color: 'var(--text-secondary, #64748b)', fontSize: '0.88rem' }}>{error}</p>
+            <AlertCircle size={36} color="#dc2626" style={{ margin: '0 auto 10px' }} />
+            <h3 style={{ margin: '0 0 6px', color: '#991b1b', fontSize: '1.05rem' }}>Could Not Load Invoice</h3>
+            <p style={{ margin: '0 0 16px', color: '#64748b', fontSize: '0.86rem' }}>{error}</p>
+            {inputNumber && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => fetchInvoice(inputNumber)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <RefreshCw size={14} />
+                <span>Retry Loading</span>
+              </button>
+            )}
           </div>
         )}
 

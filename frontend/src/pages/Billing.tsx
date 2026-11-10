@@ -256,6 +256,18 @@ export const Billing: React.FC = () => {
     }
   };
 
+  const PUBLIC_WEB_URL = 'https://techcare-frontend.onrender.com';
+  const getPublicPayUrl = (invoiceNumber: string) => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const isLocal =
+      !origin ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1') ||
+      origin.startsWith('capacitor:');
+    const base = isLocal ? PUBLIC_WEB_URL : origin;
+    return `${base}/pay/${encodeURIComponent(invoiceNumber.trim())}`;
+  };
+
   const handleSendWhatsAppInvoice = (inv: Invoice) => {
     const rawPhone = inv.customer?.phone?.replace(/\D/g, '') || '';
     if (!rawPhone) {
@@ -278,7 +290,7 @@ export const Billing: React.FC = () => {
         ? `• Diagnostic Repair Service (Ticket #${inv.repairTicket.ticketNumber})`
         : '• Direct Hardware Purchase';
 
-    const payUrl = `${window.location.origin}/pay/${inv.invoiceNumber}`;
+    const payUrl = getPublicPayUrl(inv.invoiceNumber);
 
     let statusAndPayment = '';
     if (inv.balanceAmount > 0) {
@@ -312,7 +324,7 @@ ${itemsText}
   };
 
   const handleCopyPaymentLink = (inv: Invoice) => {
-    const payUrl = `${window.location.origin}/pay/${inv.invoiceNumber}`;
+    const payUrl = getPublicPayUrl(inv.invoiceNumber);
     navigator.clipboard.writeText(payUrl);
     toast.success('Razorpay payment link copied to clipboard!');
   };

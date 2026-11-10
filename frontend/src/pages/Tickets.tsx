@@ -599,7 +599,15 @@ export const Tickets: React.FC = () => {
     const estTotal = ticket.estimatedCost || 0;
     const labor = ticket.laborCharge || 0;
     const partsEst = Math.max(0, estTotal - labor);
-    const trackingUrl = `${window.location.origin}/track/${ticket.ticketNumber}`;
+    const PUBLIC_WEB_URL = 'https://techcare-frontend.onrender.com';
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const isLocal =
+      !origin ||
+      origin.includes('localhost') ||
+      origin.includes('127.0.0.1') ||
+      origin.startsWith('capacitor:');
+    const base = isLocal ? PUBLIC_WEB_URL : origin;
+    const trackingUrl = `${base}/track/${encodeURIComponent(ticket.ticketNumber.trim())}`;
 
     const text =
       `Hello ${ticket.customer.fullName},\n\n` +

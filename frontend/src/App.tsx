@@ -52,6 +52,7 @@ export const App: React.FC = () => {
             <Route path="/login" element={<Login />} />
             <Route path="/track" element={<PublicTrack />} />
             <Route path="/track/:ticketNumber" element={<PublicTrack />} />
+            <Route path="/pay" element={<PublicInvoicePay />} />
             <Route path="/pay/:invoiceNumber" element={<PublicInvoicePay />} />
 
           <Route
