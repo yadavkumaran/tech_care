@@ -16,9 +16,13 @@ export const getApiBaseUrl = () => {
     return `${customServer.trim().replace(/\/+$/, '')}/api`;
   }
 
-  // 2. Environment variable injected at build time
-  const envUrl = (import.meta as any).env?.VITE_API_URL;
-  if (envUrl && envUrl.trim()) {
+  // 2. Environment variable injected at build time (e.g. Vite or Render hosting)
+  let envUrl = (import.meta as any).env?.VITE_API_URL;
+  // Neutralize obsolete Render URL if missing the -6uc4 service identifier
+  if (typeof envUrl === 'string' && envUrl.includes('techcare-backend.onrender.com') && !envUrl.includes('techcare-backend-6uc4')) {
+    envUrl = CLOUD_BACKEND_URL;
+  }
+  if (typeof envUrl === 'string' && envUrl.trim()) {
     return `${envUrl.trim().replace(/\/+$/, '')}/api`;
   }
 
