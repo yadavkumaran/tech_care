@@ -184,5 +184,61 @@ public class RazorpayService {
 
         return recordedPayment;
     }
+
+    /**
+     * Generates a direct payment link for an invoice.
+     * If Razorpay live credentials are provided, attempts to create via Razorpay paymentLink API.
+     * Otherwise returns null so frontend uses hosted portal link.
+     */
+    @Transactional(readOnly = true)
+    public String createPaymentLink(Long invoiceId) {
+        Invoice invoice = invoiceRepository.findById(invoiceId)
+                .orElseThrow(() -> new ResourceNotFoundException("Invoice not found with id: " + invoiceId));
+
+        if (invoice.getStatus() == InvoiceStatus.CANCELLED) {
+            throw new BadRequestException("Cannot create payment link for a CANCELLED invoice");
+        }
+
+        if (invoice.getBalanceAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Invoice #" + invoice.getInvoiceNumber() + " is already settled");
+        }
+
+        if (!isMockMode()) {
+            try {
+                RazorpayClient client = new RazorpayClient(keyId, keySecret);
+                long amountInPaise = invoice.getBalanceAmount().multiply(BigDecimal.valueOf(100)).longValue();
+
+                JSONObject paymentLinkRequest = new JSONObject();
+                paymentLinkRequest.put("amount", amountInPaise);
+                paymentLinkRequest.put("currency", currency);
+                paymentLinkRequest.put("accept_partial", false);
+                paymentLinkRequest.put("description", "Settlement for Invoice #" + invoice.getInvoiceNumber());
+
+                JSONObject customer = new JSONObject();
+                customer.put("name", invoice.getCustomer() != null ? invoice.getCustomer().getFullName() : "Customer");
+                if (invoice.getCustomer() != null && invoice.getCustomer().getPhone() != null) {
+                    customer.put("contact", invoice.getCustomer().getPhone());
+                }
+                if (invoice.getCustomer() != null && invoice.getCustomer().getEmail() != null) {
+                    customer.put("email", invoice.getCustomer().getEmail());
+                }
+                paymentLinkRequest.put("customer", customer);
+
+                JSONObject notify = new JSONObject();
+                notify.put("sms", false);
+                notify.put("email", false);
+                paymentLinkRequest.put("notify", notify);
+                paymentLinkRequest.put("reminder_enable", true);
+
+                com.razorpay.PaymentLink link = client.paymentLink.create(paymentLinkRequest);
+                if (link.has("short_url")) {
+                    return link.get("short_url");
+                }
+            } catch (Exception e) {
+                log.warn("Direct Razorpay payment link API creation failed, using hosted pay portal: {}", e.getMessage());
+            }
+        }
+        return null;
+    }
 }
 

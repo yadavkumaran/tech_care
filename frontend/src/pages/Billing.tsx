@@ -19,6 +19,10 @@ import {
   Package,
   Wrench,
   Trash2,
+  MessageSquare,
+  Link2,
+  UserPlus,
+  UserCheck,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Modal } from '../components/ui/Modal';
@@ -63,6 +67,14 @@ export const Billing: React.FC = () => {
   const [customPrice, setCustomPrice] = useState<string>('');
   const [taxRate, setTaxRate] = useState('18.00');
   const [discountAmount, setDiscountAmount] = useState('0.00');
+
+  // Quick Add Customer in Retail Sale
+  const [showQuickCustomer, setShowQuickCustomer] = useState(false);
+  const [newCustName, setNewCustName] = useState('');
+  const [newCustPhone, setNewCustPhone] = useState('');
+  const [newCustEmail, setNewCustEmail] = useState('');
+  const [newCustAddress, setNewCustAddress] = useState('');
+  const [isCreatingCustomer, setIsCreatingCustomer] = useState(false);
 
   // Record Payment Modal
   const [payingInvoice, setPayingInvoice] = useState<Invoice | null>(null);
@@ -212,6 +224,99 @@ export const Billing: React.FC = () => {
     setRetailCart((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleQuickCreateCustomer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCustName.trim() || !newCustPhone.trim()) {
+      toast.error('Customer name and phone number are required');
+      return;
+    }
+    setIsCreatingCustomer(true);
+    try {
+      const res = await api.post<ApiResponse<Customer>>('/customers', {
+        fullName: newCustName.trim(),
+        phone: newCustPhone.trim(),
+        email: newCustEmail.trim() || undefined,
+        address: newCustAddress.trim() || undefined,
+      });
+      if (res.data.success && res.data.data) {
+        const created = res.data.data;
+        setCustomers((prev) => [created, ...prev]);
+        setDirectCustomerId(created.id);
+        setShowQuickCustomer(false);
+        setNewCustName('');
+        setNewCustPhone('');
+        setNewCustEmail('');
+        setNewCustAddress('');
+        toast.success(`Customer "${created.fullName}" created & selected!`);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to create customer');
+    } finally {
+      setIsCreatingCustomer(false);
+    }
+  };
+
+  const handleSendWhatsAppInvoice = (inv: Invoice) => {
+    const rawPhone = inv.customer?.phone?.replace(/\D/g, '') || '';
+    if (!rawPhone) {
+      toast.error('Customer phone number is missing');
+      return;
+    }
+    // Prepend 91 if 10 digit Indian number without country code
+    const cleanPhone = rawPhone.length === 10 ? `91${rawPhone}` : rawPhone;
+
+    // Itemized lines
+    const itemsText =
+      inv.items && inv.items.length > 0
+        ? inv.items
+            .map(
+              (it) =>
+                `• ${it.quantity}x ${it.itemName} @ ₹${Number(it.unitPrice).toFixed(2)} = ₹${Number(it.totalPrice).toFixed(2)}`
+            )
+            .join('\n')
+        : inv.repairTicket
+        ? `• Diagnostic Repair Service (Ticket #${inv.repairTicket.ticketNumber})`
+        : '• Direct Hardware Purchase';
+
+    const payUrl = `${window.location.origin}/pay/${inv.invoiceNumber}`;
+
+    let statusAndPayment = '';
+    if (inv.balanceAmount > 0) {
+      statusAndPayment = `\n⚠️ *Outstanding Balance:* ₹${Number(inv.balanceAmount).toFixed(2)}\n\n💳 *Pay Online via Razorpay (UPI / GPay / Cards):*\n👉 ${payUrl}\n`;
+    } else {
+      statusAndPayment = `\n✅ *Status:* PAID IN FULL\nThank you for trusting TechCare!\n`;
+    }
+
+    const message = `🧾 *TechCare — Tax Invoice & Receipt*
+
+Dear *${inv.customer.fullName}*,
+Thank you for visiting TechCare! Here is the summary of your bill:
+
+📄 *Invoice No:* ${inv.invoiceNumber}
+📅 *Date:* ${inv.invoiceDate}
+📦 *Items / Services:*
+${itemsText}
+
+💰 *Gross Subtotal:* ₹${Number(inv.subtotal).toFixed(2)}${
+      Number(inv.discountAmount) > 0 ? `\n🎁 *Discount:* -₹${Number(inv.discountAmount).toFixed(2)}` : ''
+    }
+🏛️ *GST (${inv.taxRate}%):* ₹${Number(inv.taxAmount).toFixed(2)}
+⭐ *Total Amount:* ₹${Number(inv.totalAmount).toFixed(2)}
+💵 *Amount Paid:* ₹${Number(inv.paidAmount).toFixed(2)}${statusAndPayment}
+📍 *TechCare Computer & Device Service Center*
+📞 *Customer Support:* +91 98765 43210`;
+
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+    window.open(waUrl, '_blank');
+    toast.success(`Opening WhatsApp for ${inv.customer.fullName}...`);
+  };
+
+  const handleCopyPaymentLink = (inv: Invoice) => {
+    const payUrl = `${window.location.origin}/pay/${inv.invoiceNumber}`;
+    navigator.clipboard.writeText(payUrl);
+    toast.success('Razorpay payment link copied to clipboard!');
+  };
+
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -226,7 +331,7 @@ export const Billing: React.FC = () => {
 
       setIsGeneratingInvoice(true);
       try {
-        await api.post('/invoices', {
+        const res = await api.post<ApiResponse<Invoice>>('/invoices', {
           customerId: ticket.customer.id,
           repairTicketId: ticket.id,
           invoiceType: 'REPAIR',
@@ -239,6 +344,9 @@ export const Billing: React.FC = () => {
         fetchData();
         broadcastLocalUpdate('INVOICE', 'CREATED');
         toast.success('Tax invoice generated successfully!');
+        if (res.data.success && res.data.data) {
+          setViewInvoice(res.data.data);
+        }
       } catch (err: any) {
         toast.error(err.response?.data?.message || 'Error generating invoice');
       } finally {
@@ -257,7 +365,7 @@ export const Billing: React.FC = () => {
 
       setIsGeneratingInvoice(true);
       try {
-        await api.post('/invoices', {
+        const res = await api.post<ApiResponse<Invoice>>('/invoices', {
           customerId: Number(directCustomerId),
           repairTicketId: null,
           invoiceType: 'DIRECT_SALE',
@@ -279,6 +387,9 @@ export const Billing: React.FC = () => {
         broadcastLocalUpdate('INVOICE', 'CREATED');
         broadcastLocalUpdate('INVENTORY', 'UPDATED');
         toast.success('Direct hardware retail invoice generated successfully!');
+        if (res.data.success && res.data.data) {
+          setViewInvoice(res.data.data);
+        }
       } catch (err: any) {
         toast.error(err.response?.data?.message || 'Error generating retail invoice');
       } finally {
@@ -587,7 +698,16 @@ export const Billing: React.FC = () => {
                       </td>
                       <td>{getInvoiceStatusBadge(inv.status)}</td>
                       <td>
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            title="Send invoice via WhatsApp"
+                            onClick={() => handleSendWhatsAppInvoice(inv)}
+                            style={{ color: '#059669', borderColor: 'rgba(5, 150, 105, 0.3)' }}
+                          >
+                            <MessageSquare size={13} />
+                            <span>WhatsApp</span>
+                          </button>
                           <button
                             className="btn btn-outline btn-sm"
                             title="Print / View Invoice"
@@ -695,7 +815,16 @@ export const Billing: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="mobile-card-footer">
+                <div className="mobile-card-footer" style={{ flexWrap: 'wrap', gap: 6 }}>
+                  <button
+                    className="btn btn-outline btn-sm"
+                    onClick={() => handleSendWhatsAppInvoice(inv)}
+                    style={{ color: '#059669', borderColor: 'rgba(5, 150, 105, 0.3)' }}
+                  >
+                    <MessageSquare size={13} />
+                    <span>WhatsApp</span>
+                  </button>
+
                   <button
                     className="btn btn-outline btn-sm"
                     onClick={() => setViewInvoice(inv)}
@@ -848,22 +977,134 @@ export const Billing: React.FC = () => {
             <>
               {/* DIRECT HARDWARE SALE MODE */}
               <div className="form-group">
-                <label className="form-label">
-                  Customer <span className="required-mark">*</span>
-                </label>
-                <select
-                  className="form-control"
-                  required
-                  value={directCustomerId}
-                  onChange={(e) => setDirectCustomerId(e.target.value ? Number(e.target.value) : '')}
-                >
-                  <option value="">-- Choose Customer for Direct Hardware Sale --</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.fullName} — {c.phone} {c.address ? `(${c.address})` : ''}
-                    </option>
-                  ))}
-                </select>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <label className="form-label" style={{ margin: 0 }}>
+                    Customer <span className="required-mark">*</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickCustomer(!showQuickCustomer)}
+                    className="btn btn-outline btn-sm"
+                    style={{
+                      padding: '2px 8px',
+                      fontSize: '0.74rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      color: 'var(--primary)',
+                      borderColor: 'rgba(0, 113, 227, 0.4)',
+                    }}
+                  >
+                    <UserPlus size={12} />
+                    <span>{showQuickCustomer ? 'Close Quick Add' : '+ Quick Add Customer'}</span>
+                  </button>
+                </div>
+
+                {!showQuickCustomer ? (
+                  <select
+                    className="form-control"
+                    required={!showQuickCustomer}
+                    value={directCustomerId}
+                    onChange={(e) => setDirectCustomerId(e.target.value ? Number(e.target.value) : '')}
+                  >
+                    <option value="">-- Choose Customer for Direct Hardware Sale --</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.fullName} — {c.phone} {c.address ? `(${c.address})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div
+                    style={{
+                      padding: '12px 14px',
+                      background: 'rgba(0, 113, 227, 0.05)',
+                      border: '1px solid rgba(0, 113, 227, 0.25)',
+                      borderRadius: 10,
+                      marginTop: 4,
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: '0.80rem', color: 'var(--primary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <UserPlus size={14} />
+                      <span>Register New Customer on Counter</span>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginBottom: 8 }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: '0.72rem' }}>Full Name <span className="required-mark">*</span></label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. Rahul Sharma"
+                          value={newCustName}
+                          onChange={(e) => setNewCustName(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: '0.72rem' }}>Phone Number <span className="required-mark">*</span></label>
+                        <input
+                          type="tel"
+                          className="form-control"
+                          placeholder="e.g. 9876543210"
+                          value={newCustPhone}
+                          onChange={(e) => setNewCustPhone(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 8, marginBottom: 10 }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: '0.72rem' }}>Email (Optional)</label>
+                        <input
+                          type="email"
+                          className="form-control"
+                          placeholder="name@example.com"
+                          value={newCustEmail}
+                          onChange={(e) => setNewCustEmail(e.target.value)}
+                        />
+                      </div>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: '0.72rem' }}>Address / City (Optional)</label>
+                        <input
+                          type="text"
+                          className="form-control"
+                          placeholder="e.g. Anna Nagar, Chennai"
+                          value={newCustAddress}
+                          onChange={(e) => setNewCustAddress(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="btn btn-outline btn-sm"
+                        onClick={() => setShowQuickCustomer(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        onClick={handleQuickCreateCustomer}
+                        disabled={isCreatingCustomer || !newCustName.trim() || !newCustPhone.trim()}
+                        style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+                      >
+                        {isCreatingCustomer ? (
+                          <>
+                            <Loader2 size={13} className="spin-fast" />
+                            <span>Saving...</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserCheck size={14} />
+                            <span>Save & Select Customer</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Hardware Selection Section */}
@@ -1495,14 +1736,54 @@ export const Billing: React.FC = () => {
             </div>
           </div>
 
-          <div className="modal-footer no-print">
-            <button className="btn btn-outline" onClick={() => setViewInvoice(null)}>
-              Close
-            </button>
-            <button className="btn btn-primary" onClick={printBill}>
-              <Printer size={15} />
-              <span>Print Official Invoice</span>
-            </button>
+          <div className="modal-footer no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                className="btn btn-outline"
+                onClick={() => handleSendWhatsAppInvoice(viewInvoice)}
+                style={{
+                  background: '#25D366',
+                  color: '#ffffff',
+                  borderColor: '#25D366',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontWeight: 600,
+                  boxShadow: '0 2px 8px rgba(37, 211, 102, 0.25)',
+                }}
+              >
+                <MessageSquare size={15} />
+                <span>Send to Customer WhatsApp</span>
+              </button>
+
+              {viewInvoice.balanceAmount > 0 && (
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  onClick={() => handleCopyPaymentLink(viewInvoice)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                  }}
+                  title="Copy Razorpay Online Payment Link"
+                >
+                  <Link2 size={15} />
+                  <span>Copy Pay Link</span>
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-outline" onClick={() => setViewInvoice(null)}>
+                Close
+              </button>
+              <button className="btn btn-primary" onClick={printBill}>
+                <Printer size={15} />
+                <span>Print Official Invoice</span>
+              </button>
+            </div>
           </div>
         </Modal>
       )}

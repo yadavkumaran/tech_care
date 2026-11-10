@@ -13,6 +13,7 @@ import { Inventory } from './pages/Inventory';
 import { Purchases } from './pages/Purchases';
 import { Staff } from './pages/Staff';
 import { Billing } from './pages/Billing';
+import { PublicInvoicePay } from './pages/PublicInvoicePay';
 
 // Protected Route Component
 const ProtectedRoute: React.FC<{ children: React.ReactElement }> = ({ children }) => {
@@ -51,6 +52,7 @@ export const App: React.FC = () => {
             <Route path="/login" element={<Login />} />
             <Route path="/track" element={<PublicTrack />} />
             <Route path="/track/:ticketNumber" element={<PublicTrack />} />
+            <Route path="/pay/:invoiceNumber" element={<PublicInvoicePay />} />
 
           <Route
             path="/"

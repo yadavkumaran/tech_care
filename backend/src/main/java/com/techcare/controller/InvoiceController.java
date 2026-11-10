@@ -7,6 +7,7 @@ import com.techcare.entity.User;
 import com.techcare.repository.UserRepository;
 import com.techcare.security.UserDetailsImpl;
 import com.techcare.service.InvoiceService;
+import com.techcare.service.RazorpayService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -24,6 +25,7 @@ public class InvoiceController {
 
     private final InvoiceService invoiceService;
     private final UserRepository userRepository;
+    private final RazorpayService razorpayService;
 
     @GetMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
@@ -62,6 +64,13 @@ public class InvoiceController {
         User currentUser = userDetails != null ? userRepository.findById(userDetails.getId()).orElse(null) : null;
         Invoice invoice = invoiceService.cancelInvoice(id, currentUser);
         return ResponseEntity.ok(ApiResponse.success("Invoice cancelled successfully", invoice));
+    }
+
+    @PostMapping("/{id}/payment-link")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
+    public ResponseEntity<ApiResponse<String>> generatePaymentLink(@PathVariable Long id) {
+        String paymentLink = razorpayService.createPaymentLink(id);
+        return ResponseEntity.ok(ApiResponse.success("Payment link generated", paymentLink));
     }
 }
 
