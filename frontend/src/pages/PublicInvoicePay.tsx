@@ -81,7 +81,7 @@ export const PublicInvoicePay: React.FC = () => {
     try {
       const res = await api.get<ApiResponse<PublicInvoice>>(
         `/public/invoices/${encodeURIComponent(cleanNum)}`,
-        { timeout: 15000 }
+        { timeout: 60000 }
       );
       if (res.data.success && res.data.data) {
         setInvoice(res.data.data);
@@ -91,7 +91,7 @@ export const PublicInvoicePay: React.FC = () => {
       }
     } catch (err: any) {
       if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Connection timed out while reaching server. The server may be waking up, please tap Retry below.');
+        setError('Connection timed out while reaching server. The server is waking up, please tap Retry Loading below.');
       } else {
         setError(err.response?.data?.message || `Invoice #${cleanNum} not found or link has expired.`);
       }
@@ -119,7 +119,7 @@ export const PublicInvoicePay: React.FC = () => {
           invoiceId: invoice.id,
           amount: invoice.balanceAmount,
         },
-        { timeout: 15000 }
+        { timeout: 60000 }
       );
 
       if (!orderRes.data.success || !orderRes.data.data) {
@@ -141,7 +141,7 @@ export const PublicInvoicePay: React.FC = () => {
                 razorpaySignature: paymentRes.razorpay_signature,
                 paymentMethod: 'UPI',
               },
-              { timeout: 15000 }
+              { timeout: 60000 }
             );
 
             if (verifyRes.data.success) {
@@ -276,7 +276,7 @@ export const PublicInvoicePay: React.FC = () => {
               Retrieving invoice details...
             </div>
             <div style={{ color: 'var(--text-secondary, #64748b)', fontSize: '0.80rem', marginTop: 4 }}>
-              Connecting to secure payment gateway, please wait a moment
+              Connecting to secure payment gateway... (First request may take a few seconds)
             </div>
           </div>
         )}

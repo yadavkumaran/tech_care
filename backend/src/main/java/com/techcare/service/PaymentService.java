@@ -121,8 +121,9 @@ public class PaymentService {
 
         invoiceRepository.save(invoice);
 
-        syncService.publishEvent("PAYMENT", "RECORDED", savedPayment.getId(), savedPayment.getPaymentReference(), currentUser.getUsername());
-        syncService.publishEvent("INVOICE", "PAYMENT_RECORDED", invoice.getId(), invoice.getInvoiceNumber(), currentUser.getUsername());
+        String actor = currentUser != null ? currentUser.getUsername() : "Online Customer";
+        syncService.publishEvent("PAYMENT", "RECORDED", savedPayment.getId(), savedPayment.getPaymentReference(), actor);
+        syncService.publishEvent("INVOICE", "PAYMENT_RECORDED", invoice.getId(), invoice.getInvoiceNumber(), actor);
 
         return savedPayment;
     }

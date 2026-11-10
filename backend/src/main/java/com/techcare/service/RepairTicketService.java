@@ -191,7 +191,8 @@ public class RepairTicketService {
                 .build();
         ticketLogRepository.save(log);
 
-        syncService.publishEvent("TICKET", "CREATED", savedTicket.getId(), savedTicket.getTicketNumber(), currentUser.getUsername());
+        String actor = currentUser != null ? currentUser.getUsername() : "System";
+        syncService.publishEvent("TICKET", "CREATED", savedTicket.getId(), savedTicket.getTicketNumber(), actor);
 
         return savedTicket;
     }
@@ -240,7 +241,8 @@ public class RepairTicketService {
                 .build();
         ticketLogRepository.save(log);
 
-        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), currentUser.getUsername());
+        String actor = currentUser != null ? currentUser.getUsername() : "System";
+        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), actor);
 
         return updated;
     }
@@ -350,7 +352,8 @@ public class RepairTicketService {
                 .build();
         ticketLogRepository.save(log);
 
-        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), currentUser.getUsername());
+        String actor = currentUser != null ? currentUser.getUsername() : "System";
+        syncService.publishEvent("TICKET", "STATUS_CHANGED", updated.getId(), updated.getTicketNumber(), actor);
 
         return updated;
     }
@@ -400,8 +403,9 @@ public class RepairTicketService {
                 .build();
         stockMovementRepository.save(movement);
 
-        syncService.publishEvent("TICKET", "PART_CONSUMED", ticket.getId(), ticket.getTicketNumber(), currentUser.getUsername());
-        syncService.publishEvent("INVENTORY", "PART_CONSUMED", savedPart.getId(), item.getSku(), currentUser.getUsername());
+        String actor = currentUser != null ? currentUser.getUsername() : "System";
+        syncService.publishEvent("TICKET", "PART_CONSUMED", ticket.getId(), ticket.getTicketNumber(), actor);
+        syncService.publishEvent("INVENTORY", "PART_CONSUMED", savedPart.getId(), item.getSku(), actor);
 
         return savedPart;
     }

@@ -141,8 +141,9 @@ public class PurchaseService {
             stockMovementRepository.save(m);
         }
 
-        syncService.publishEvent("PURCHASE", "RECORDED", savedPurchase.getId(), savedPurchase.getPurchaseOrderNumber(), currentUser.getUsername());
-        syncService.publishEvent("INVENTORY", "STOCK_INCREASED", savedPurchase.getId(), savedPurchase.getPurchaseOrderNumber(), currentUser.getUsername());
+        String actor = currentUser != null ? currentUser.getUsername() : "Staff";
+        syncService.publishEvent("PURCHASE", "RECORDED", savedPurchase.getId(), savedPurchase.getPurchaseOrderNumber(), actor);
+        syncService.publishEvent("INVENTORY", "STOCK_INCREASED", savedPurchase.getId(), savedPurchase.getPurchaseOrderNumber(), actor);
 
         return savedPurchase;
     }
