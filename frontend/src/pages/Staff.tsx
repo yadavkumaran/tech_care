@@ -13,6 +13,12 @@ import {
   CheckCircle,
   KeyRound,
   Loader2,
+  Eye,
+  EyeOff,
+  Check,
+  X,
+  Sparkles,
+  Lock,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Modal } from '../components/ui/Modal';
@@ -45,6 +51,52 @@ export const Staff: React.FC = () => {
   // Button loading state
   const [savingStaff, setSavingStaff] = useState(false);
   const [deletingStaffId, setDeletingStaffId] = useState<number | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Password Policy Validation Criteria
+  const passwordCriteria = {
+    length: password.length >= 8,
+    hasUpper: /[A-Z]/.test(password),
+    hasLower: /[a-z]/.test(password),
+    hasNumber: /[0-9]/.test(password),
+    hasSpecial: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?~`]/.test(password),
+  };
+
+  const isPasswordValid = Object.values(passwordCriteria).every(Boolean);
+
+  const passedCriteriaCount = Object.values(passwordCriteria).filter(Boolean).length;
+  const strengthLabel =
+    password.length === 0
+      ? 'Not Set'
+      : passedCriteriaCount <= 2
+      ? 'Weak'
+      : passedCriteriaCount <= 4
+      ? 'Moderate'
+      : 'Strong & Compliant';
+  const strengthColor =
+    passedCriteriaCount <= 2
+      ? 'var(--status-danger, #ef4444)'
+      : passedCriteriaCount <= 4
+      ? 'var(--status-warning, #f59e0b)'
+      : 'var(--status-success, #10b981)';
+
+  const generateStrongPassword = () => {
+    const uppers = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lowers = 'abcdefghijkmnopqrstuvwxyz';
+    const digits = '23456789';
+    const specials = '@$!%*?&#^';
+
+    let pwd = '';
+    for (let i = 0; i < 3; i++) pwd += uppers[Math.floor(Math.random() * uppers.length)];
+    for (let i = 0; i < 4; i++) pwd += lowers[Math.floor(Math.random() * lowers.length)];
+    for (let i = 0; i < 3; i++) pwd += digits[Math.floor(Math.random() * digits.length)];
+    for (let i = 0; i < 2; i++) pwd += specials[Math.floor(Math.random() * specials.length)];
+
+    const shuffled = pwd.split('').sort(() => 0.5 - Math.random()).join('');
+    setPassword(shuffled);
+    setShowPassword(true);
+    toast.info('Strong compliant password generated and applied.');
+  };
 
   const { toast } = useToast();
   const { broadcastLocalUpdate } = useSync();
@@ -78,6 +130,7 @@ export const Staff: React.FC = () => {
     setSelectedStaffId(null);
     setUsername('');
     setPassword('');
+    setShowPassword(false);
     setFullName('');
     setEmail('');
     setPhone('');
@@ -91,6 +144,7 @@ export const Staff: React.FC = () => {
     setSelectedStaffId(u.id);
     setUsername(u.username);
     setPassword('');
+    setShowPassword(false);
     setFullName(u.fullName);
     setEmail(u.email);
     setPhone(u.phone || '');
@@ -101,6 +155,16 @@ export const Staff: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!isEditing && !isPasswordValid) {
+      toast.warning('Please meet all strict password requirements before registering staff (8+ chars, 1 uppercase, 1 lowercase, 1 number, 1 special char).');
+      return;
+    }
+    if (isEditing && password.trim() && !isPasswordValid) {
+      toast.warning('New password does not meet the strict security requirements.');
+      return;
+    }
+
     setSavingStaff(true);
     try {
       if (isEditing && selectedStaffId) {
@@ -531,17 +595,108 @@ export const Staff: React.FC = () => {
             </div>
 
             <div className="form-group">
-              <label className="form-label">
-                {isEditing ? 'New Password (Leave blank to keep current)' : 'Password *'}
-              </label>
-              <input
-                type="password"
-                className="form-control"
-                required={!isEditing}
-                placeholder="••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <label className="form-label" style={{ marginBottom: 0 }}>
+                  {isEditing ? 'New Password (Optional)' : 'Staff Password'} <span className="required-mark">{!isEditing ? '*' : ''}</span>
+                </label>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  style={{ color: 'var(--primary)', gap: 4, padding: '2px 6px', fontSize: '0.74rem' }}
+                  onClick={generateStrongPassword}
+                >
+                  <Sparkles size={12} />
+                  <span>Auto-Generate</span>
+                </button>
+              </div>
+
+              <div style={{ position: 'relative' }}>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  className="form-control"
+                  required={!isEditing}
+                  placeholder={isEditing ? 'Leave blank to keep current password' : 'Enter strong password (e.g. Staff@2026)'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  style={{ paddingRight: 40, fontFamily: showPassword ? 'inherit' : 'monospace' }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-xs"
+                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', padding: 6, color: 'var(--text-tertiary)' }}
+                  onClick={() => setShowPassword(!showPassword)}
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+
+              {/* Strict Security Policy Checklist (shown for new staff or when modifying password) */}
+              {(!isEditing || password.length > 0) && (
+                <div
+                  style={{
+                    marginTop: 8,
+                    padding: '10px 12px',
+                    borderRadius: 8,
+                    background: 'var(--bg-surface-subtle)',
+                    border: '1px solid var(--border-default)',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: '0.74rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                      Security Requirements:
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '0.72rem',
+                        fontWeight: 700,
+                        color: strengthColor,
+                      }}
+                    >
+                      {strengthLabel} ({passedCriteriaCount}/5)
+                    </span>
+                  </div>
+
+                  {/* Progress Meter Bar */}
+                  <div style={{ height: 4, width: '100%', background: 'var(--border-default)', borderRadius: 2, overflow: 'hidden', marginBottom: 8 }}>
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${(passedCriteriaCount / 5) * 100}%`,
+                        background: strengthColor,
+                        transition: 'width 0.3s ease, background 0.3s ease',
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '4px 8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.length ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
+                      {passwordCriteria.length ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
+                      <span>8+ Characters</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasUpper ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
+                      {passwordCriteria.hasUpper ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
+                      <span>1+ Uppercase (A-Z)</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasLower ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
+                      {passwordCriteria.hasLower ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
+                      <span>1+ Lowercase (a-z)</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasNumber ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
+                      {passwordCriteria.hasNumber ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
+                      <span>1+ Number (0-9)</span>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: '0.72rem', color: passwordCriteria.hasSpecial ? 'var(--status-success-text, #16a34a)' : 'var(--text-tertiary)' }}>
+                      {passwordCriteria.hasSpecial ? <Check size={12} strokeWidth={3} /> : <span style={{ width: 12, textAlign: 'center' }}>•</span>}
+                      <span>1+ Symbol (@#$!%&)</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

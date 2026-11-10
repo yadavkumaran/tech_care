@@ -49,6 +49,7 @@ public class StaffService {
         if (request.getPassword() == null || request.getPassword().trim().isEmpty()) {
             throw new BadRequestException("Password is required when creating a new staff member");
         }
+        validateStaffPasswordPolicy(request.getPassword().trim());
 
         Role role;
         try {
@@ -97,8 +98,9 @@ public class StaffService {
             user.setIsActive(request.getIsActive());
         }
 
-        // If a new password is provided, update it
+        // If a new password is provided, validate and update it
         if (request.getPassword() != null && !request.getPassword().trim().isEmpty()) {
+            validateStaffPasswordPolicy(request.getPassword().trim());
             user.setPasswordHash(passwordEncoder.encode(request.getPassword().trim()));
         }
 
@@ -124,6 +126,32 @@ public class StaffService {
                 user.setIsActive(false);
                 userRepository.save(user);
             }
+        }
+    }
+
+    /**
+     * Enforces strict enterprise security policy for new and updated staff passwords:
+     * - Minimum 8 characters in length
+     * - At least one uppercase letter (A-Z)
+     * - At least one lowercase letter (a-z)
+     * - At least one numeric digit (0-9)
+     * - At least one special symbol (@, #, $, %, !, &, etc.)
+     */
+    public static void validateStaffPasswordPolicy(String password) {
+        if (password == null || password.length() < 8) {
+            throw new BadRequestException("Password must be at least 8 characters in length.");
+        }
+        if (!password.matches(".*[A-Z].*")) {
+            throw new BadRequestException("Password must contain at least one uppercase letter (A-Z).");
+        }
+        if (!password.matches(".*[a-z].*")) {
+            throw new BadRequestException("Password must contain at least one lowercase letter (a-z).");
+        }
+        if (!password.matches(".*[0-9].*")) {
+            throw new BadRequestException("Password must contain at least one numeric digit (0-9).");
+        }
+        if (!password.matches(".*[!@#$%^&*()_+\\-=\\[\\]{};':\"\\\\|,.<>\\/?~`].*")) {
+            throw new BadRequestException("Password must contain at least one special character (e.g. @, #, $, %, !, &).");
         }
     }
 }
