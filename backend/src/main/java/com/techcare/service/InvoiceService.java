@@ -4,10 +4,13 @@ import com.techcare.dto.request.InvoiceRequest;
 import com.techcare.entity.*;
 import com.techcare.entity.enums.InvoiceStatus;
 import com.techcare.entity.enums.InvoiceType;
+import com.techcare.entity.enums.MovementType;
 import com.techcare.entity.enums.TicketStatus;
 import com.techcare.exception.BadRequestException;
 import com.techcare.exception.ResourceNotFoundException;
+import com.techcare.repository.InventoryItemRepository;
 import com.techcare.repository.InvoiceRepository;
+import com.techcare.repository.StockMovementRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
@@ -28,6 +31,8 @@ public class InvoiceService {
     private final CustomerService customerService;
     private final RepairTicketService ticketService;
     private final SyncNotificationService syncService;
+    private final InventoryItemRepository inventoryRepository;
+    private final StockMovementRepository stockMovementRepository;
 
     @Transactional(readOnly = true)
     public List<Invoice> getAllInvoices() {
@@ -65,6 +70,11 @@ public class InvoiceService {
 
     @Transactional
     public Invoice generateInvoice(InvoiceRequest request) {
+        return generateInvoice(request, null);
+    }
+
+    @Transactional
+    public Invoice generateInvoice(InvoiceRequest request, User currentUser) {
         Customer customer = customerService.getCustomerById(request.getCustomerId());
 
         RepairTicket ticket = null;
@@ -159,7 +169,7 @@ public class InvoiceService {
             }
         }
 
-        // Add any custom line items (e.g. for direct retail sales)
+        // Add any custom line items (e.g. for direct retail hardware sales)
         if (request.getCustomItems() != null) {
             for (InvoiceRequest.InvoiceItemDto dto : request.getCustomItems()) {
                 if (dto.getQuantity() == null || dto.getQuantity() <= 0) {
@@ -171,10 +181,43 @@ public class InvoiceService {
                 BigDecimal lineTotal = dto.getUnitPrice().multiply(BigDecimal.valueOf(dto.getQuantity()));
                 subtotal = subtotal.add(lineTotal);
 
+                InventoryItem inventoryItem = null;
+                if (dto.getItemId() != null) {
+                    inventoryItem = inventoryRepository.findById(dto.getItemId())
+                            .orElseThrow(() -> new ResourceNotFoundException("Inventory item not found with id: " + dto.getItemId()));
+
+                    // Check stock sufficiency for hardware sales
+                    if (inventoryItem.getCurrentStock() < dto.getQuantity()) {
+                        throw new BadRequestException("Insufficient stock for item '" + inventoryItem.getName() +
+                                "'. Available: " + inventoryItem.getCurrentStock() + ", Requested: " + dto.getQuantity());
+                    }
+
+                    // Decrement inventory stock
+                    int newStock = inventoryItem.getCurrentStock() - dto.getQuantity();
+                    inventoryItem.setCurrentStock(newStock);
+                    inventoryRepository.save(inventoryItem);
+
+                    // Record StockMovement audit entry
+                    StockMovement movement = StockMovement.builder()
+                            .item(inventoryItem)
+                            .movementType(MovementType.RETAIL_SALE)
+                            .quantity(-dto.getQuantity())
+                            .balanceAfter(newStock)
+                            .referenceType("INVOICE")
+                            .notes("Direct retail hardware sale: " + invoiceNumber + " to " + customer.getFullName())
+                            .performedBy(currentUser)
+                            .build();
+                    stockMovementRepository.save(movement);
+                }
+
+                String itemName = dto.getItemName() != null ? dto.getItemName() : (inventoryItem != null ? inventoryItem.getName() : "Item");
+                String itemType = dto.getItemType() != null ? dto.getItemType() : (inventoryItem != null ? "PART" : "ACCESSORY");
+
                 InvoiceItem item = InvoiceItem.builder()
                         .invoice(invoice)
-                        .itemName(dto.getItemName() != null ? dto.getItemName() : "Item")
-                        .itemType(dto.getItemType() != null ? dto.getItemType() : "ACCESSORY")
+                        .item(inventoryItem)
+                        .itemName(itemName)
+                        .itemType(itemType)
                         .quantity(dto.getQuantity())
                         .unitPrice(dto.getUnitPrice())
                         .totalPrice(lineTotal)
@@ -224,6 +267,11 @@ public class InvoiceService {
 
     @Transactional
     public Invoice cancelInvoice(Long id) {
+        return cancelInvoice(id, null);
+    }
+
+    @Transactional
+    public Invoice cancelInvoice(Long id, User currentUser) {
         Invoice invoice = getInvoiceById(id);
 
         if (invoice.getStatus() == InvoiceStatus.CANCELLED) {
@@ -233,6 +281,29 @@ public class InvoiceService {
         if (invoice.getPaidAmount().compareTo(BigDecimal.ZERO) > 0 || invoice.getStatus() == InvoiceStatus.PAID || invoice.getStatus() == InvoiceStatus.PARTIALLY_PAID) {
             throw new BadRequestException("Cannot cancel Invoice #" + invoice.getInvoiceNumber() +
                     ": recorded payments totaling ₹" + invoice.getPaidAmount() + " exist. Void/refund payments before cancelling.");
+        }
+
+        // If direct retail sale, restore inventory stock for parts sold
+        if (invoice.getInvoiceType() == InvoiceType.DIRECT_SALE && invoice.getItems() != null) {
+            for (InvoiceItem item : invoice.getItems()) {
+                if (item.getItem() != null) {
+                    InventoryItem invItem = item.getItem();
+                    int restoredStock = invItem.getCurrentStock() + item.getQuantity();
+                    invItem.setCurrentStock(restoredStock);
+                    inventoryRepository.save(invItem);
+
+                    StockMovement returnMovement = StockMovement.builder()
+                            .item(invItem)
+                            .movementType(MovementType.RESTOCK_RETURN)
+                            .quantity(item.getQuantity())
+                            .balanceAfter(restoredStock)
+                            .referenceType("INVOICE_CANCEL")
+                            .notes("Restocked upon cancellation of Retail Invoice #" + invoice.getInvoiceNumber())
+                            .performedBy(currentUser)
+                            .build();
+                    stockMovementRepository.save(returnMovement);
+                }
+            }
         }
 
         invoice.setStatus(InvoiceStatus.CANCELLED);

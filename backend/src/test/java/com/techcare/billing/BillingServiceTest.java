@@ -68,6 +68,9 @@ public class BillingServiceTest {
     private InventoryItemRepository inventoryRepository;
 
     @Autowired
+    private StockMovementRepository stockMovementRepository;
+
+    @Autowired
     private TicketPartUsedRepository ticketPartUsedRepository;
 
     private User adminUser;
@@ -426,5 +429,55 @@ public class BillingServiceTest {
         // Cancellation must now fail because payments exist
         BadRequestException ex2 = assertThrows(BadRequestException.class, () -> invoiceService.cancelInvoice(inv2.getId()));
         assertTrue(ex2.getMessage().contains("recorded payments"));
+    }
+
+    @Test
+    @DisplayName("Verify Direct Hardware Retail Sale stock deduction and restock upon invoice cancellation")
+    public void testDirectHardwareSaleStockDeductionAndRestockOnCancel() {
+        // Create a standalone retail hardware item with 10 units in stock
+        InventoryItem mouseItem = InventoryItem.builder()
+                .sku("MOU-WIR-001")
+                .name("Wireless Optical Mouse")
+                .category("PERIPHERALS")
+                .costPrice(new BigDecimal("350.00"))
+                .sellingPrice(new BigDecimal("750.00"))
+                .currentStock(10)
+                .reorderLevel(2)
+                .isActive(true)
+                .build();
+        mouseItem = inventoryRepository.save(mouseItem);
+
+        InvoiceRequest.InvoiceItemDto saleItem = new InvoiceRequest.InvoiceItemDto();
+        saleItem.setItemId(mouseItem.getId());
+        saleItem.setItemName(mouseItem.getName());
+        saleItem.setItemType("PART");
+        saleItem.setQuantity(3);
+        saleItem.setUnitPrice(new BigDecimal("750.00"));
+
+        InvoiceRequest saleRequest = new InvoiceRequest();
+        saleRequest.setCustomerId(customer1.getId());
+        saleRequest.setInvoiceType("DIRECT_SALE");
+        saleRequest.setTaxRate(new BigDecimal("18.00"));
+        saleRequest.setDiscountAmount(BigDecimal.ZERO);
+        saleRequest.setCustomItems(List.of(saleItem));
+
+        Invoice retailInvoice = invoiceService.generateInvoice(saleRequest, receptionistUser);
+        assertNotNull(retailInvoice);
+        assertEquals(InvoiceType.DIRECT_SALE, retailInvoice.getInvoiceType());
+
+        // Verify inventory stock was decremented from 10 to 7
+        InventoryItem stockAfterSale = inventoryRepository.findById(mouseItem.getId()).orElseThrow();
+        assertEquals(7, stockAfterSale.getCurrentStock());
+
+        // Verify stock movement ledger recorded RETAIL_SALE
+        var movements = stockMovementRepository.findByItemIdOrderByCreatedAtDesc(mouseItem.getId());
+        assertFalse(movements.isEmpty());
+        assertEquals(-3, movements.get(0).getQuantity());
+        assertEquals(7, movements.get(0).getBalanceAfter());
+
+        // Cancel unpaid retail invoice - verify stock is restored from 7 to 10
+        invoiceService.cancelInvoice(retailInvoice.getId(), receptionistUser);
+        InventoryItem stockAfterCancel = inventoryRepository.findById(mouseItem.getId()).orElseThrow();
+        assertEquals(10, stockAfterCancel.getCurrentStock());
     }
 }

@@ -3,12 +3,16 @@ package com.techcare.controller;
 import com.techcare.dto.request.InvoiceRequest;
 import com.techcare.dto.response.ApiResponse;
 import com.techcare.entity.Invoice;
+import com.techcare.entity.User;
+import com.techcare.repository.UserRepository;
+import com.techcare.security.UserDetailsImpl;
 import com.techcare.service.InvoiceService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -19,6 +23,7 @@ import java.util.List;
 public class InvoiceController {
 
     private final InvoiceService invoiceService;
+    private final UserRepository userRepository;
 
     @GetMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
@@ -40,16 +45,22 @@ public class InvoiceController {
 
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
-    public ResponseEntity<ApiResponse<Invoice>> generateInvoice(@Valid @RequestBody InvoiceRequest request) {
-        Invoice invoice = invoiceService.generateInvoice(request);
+    public ResponseEntity<ApiResponse<Invoice>> generateInvoice(
+            @Valid @RequestBody InvoiceRequest request,
+            @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        User currentUser = userDetails != null ? userRepository.findById(userDetails.getId()).orElse(null) : null;
+        Invoice invoice = invoiceService.generateInvoice(request, currentUser);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Invoice generated successfully", invoice));
     }
 
     @PatchMapping("/{id}/cancel")
     @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<Invoice>> cancelInvoice(@PathVariable Long id) {
-        Invoice invoice = invoiceService.cancelInvoice(id);
+    public ResponseEntity<ApiResponse<Invoice>> cancelInvoice(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetailsImpl userDetails) {
+        User currentUser = userDetails != null ? userRepository.findById(userDetails.getId()).orElse(null) : null;
+        Invoice invoice = invoiceService.cancelInvoice(id, currentUser);
         return ResponseEntity.ok(ApiResponse.success("Invoice cancelled successfully", invoice));
     }
 }

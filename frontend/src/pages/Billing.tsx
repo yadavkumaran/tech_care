@@ -15,6 +15,10 @@ import {
   TrendingUp,
   Cpu,
   Loader2,
+  ShoppingBag,
+  Package,
+  Wrench,
+  Trash2,
 } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { Modal } from '../components/ui/Modal';
@@ -24,22 +28,39 @@ import { EmptyState } from '../components/ui/EmptyState';
 import { SearchInput } from '../components/ui/SearchInput';
 import { SkeletonStatCard, SkeletonTableRows, SkeletonCard } from '../components/ui/LoadingSequence';
 import api from '../api/client';
-import { ApiResponse, Customer, Invoice, Payment, RepairTicket } from '../types';
+import { ApiResponse, Customer, InventoryItem, Invoice, Payment, RepairTicket } from '../types';
 import { useToast } from '../context/ToastContext';
 import { useSync, useRealtimeSync } from '../context/SyncContext';
 import { LayoutContextType } from '../components/Layout';
 import { launchRazorpayCheckout, RazorpayOrderData } from '../utils/razorpay';
 
+interface RetailCartItem {
+  itemId: number;
+  sku: string;
+  name: string;
+  availableStock: number;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
 export const Billing: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [tickets, setTickets] = useState<RepairTicket[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
   // New Invoice Modal
   const [showInvoiceModal, setShowInvoiceModal] = useState(false);
+  const [invoiceTypeMode, setInvoiceTypeMode] = useState<'REPAIR' | 'DIRECT_SALE'>('REPAIR');
   const [selectedTicketId, setSelectedTicketId] = useState<number | ''>('');
+  const [directCustomerId, setDirectCustomerId] = useState<number | ''>('');
+  const [retailCart, setRetailCart] = useState<RetailCartItem[]>([]);
+  const [selectedInventoryId, setSelectedInventoryId] = useState<number | ''>('');
+  const [selectedQty, setSelectedQty] = useState<number>(1);
+  const [customPrice, setCustomPrice] = useState<string>('');
   const [taxRate, setTaxRate] = useState('18.00');
   const [discountAmount, setDiscountAmount] = useState('0.00');
 
@@ -107,6 +128,7 @@ export const Billing: React.FC = () => {
         api.get<ApiResponse<Invoice[]>>('/invoices'),
         api.get<ApiResponse<RepairTicket[]>>('/tickets'),
         api.get<ApiResponse<Customer[]>>('/customers'),
+        api.get<ApiResponse<InventoryItem[]>>('/inventory'),
       ]);
 
       if (results[0].status === 'fulfilled' && results[0].value.data.success) {
@@ -118,6 +140,9 @@ export const Billing: React.FC = () => {
       if (results[2].status === 'fulfilled' && results[2].value.data.success) {
         setCustomers(results[2].value.data.data);
       }
+      if (results[3].status === 'fulfilled' && results[3].value.data.success) {
+        setInventoryItems(results[3].value.data.data);
+      }
     } catch (err) {
       console.error('Failed to load billing data', err);
     } finally {
@@ -125,37 +150,140 @@ export const Billing: React.FC = () => {
     }
   };
 
-  // Real-time synchronization: silently refresh invoices & balances when payments/tickets update
-  useRealtimeSync(['INVOICE', 'PAYMENT', 'TICKET'], () => {
+  // Real-time synchronization: silently refresh invoices & balances when payments/tickets/inventory update
+  useRealtimeSync(['INVOICE', 'PAYMENT', 'TICKET', 'INVENTORY'], () => {
     fetchData(false);
   });
 
+  const handleAddRetailItem = () => {
+    if (!selectedInventoryId) {
+      toast.error('Please select a hardware item from inventory');
+      return;
+    }
+    const invItem = inventoryItems.find((i) => i.id === Number(selectedInventoryId));
+    if (!invItem) return;
+
+    const qty = Number(selectedQty) || 1;
+    if (qty <= 0) {
+      toast.error('Quantity must be at least 1');
+      return;
+    }
+
+    const existingIndex = retailCart.findIndex((ci) => ci.itemId === invItem.id);
+    const currentInCart = existingIndex >= 0 ? retailCart[existingIndex].quantity : 0;
+    if (currentInCart + qty > invItem.currentStock) {
+      toast.error(`Cannot add ${qty} units. Only ${invItem.currentStock} in stock (${currentInCart} already in cart).`);
+      return;
+    }
+
+    const price = customPrice !== '' ? Number(customPrice) : Number(invItem.sellingPrice);
+    if (isNaN(price) || price < 0) {
+      toast.error('Unit price cannot be negative');
+      return;
+    }
+
+    if (existingIndex >= 0) {
+      const updated = [...retailCart];
+      updated[existingIndex].quantity += qty;
+      updated[existingIndex].unitPrice = price;
+      updated[existingIndex].lineTotal = updated[existingIndex].quantity * price;
+      setRetailCart(updated);
+    } else {
+      setRetailCart([
+        ...retailCart,
+        {
+          itemId: invItem.id,
+          sku: invItem.sku,
+          name: invItem.name,
+          availableStock: invItem.currentStock,
+          quantity: qty,
+          unitPrice: price,
+          lineTotal: qty * price,
+        },
+      ]);
+    }
+
+    setSelectedInventoryId('');
+    setSelectedQty(1);
+    setCustomPrice('');
+  };
+
+  const handleRemoveRetailItem = (index: number) => {
+    setRetailCart((prev) => prev.filter((_, i) => i !== index));
+  };
+
   const handleCreateInvoice = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedTicketId) return;
 
-    const ticket = tickets.find((t) => t.id === Number(selectedTicketId));
-    if (!ticket) return;
+    if (invoiceTypeMode === 'REPAIR') {
+      if (!selectedTicketId) {
+        toast.error('Please select an available repair ticket');
+        return;
+      }
 
-    setIsGeneratingInvoice(true);
-    try {
-      await api.post('/invoices', {
-        customerId: ticket.customer.id,
-        repairTicketId: ticket.id,
-        invoiceType: 'REPAIR',
-        taxRate: Number(taxRate),
-        discountAmount: Number(discountAmount),
-      });
+      const ticket = tickets.find((t) => t.id === Number(selectedTicketId));
+      if (!ticket) return;
 
-      setShowInvoiceModal(false);
-      setSelectedTicketId('');
-      fetchData();
-      broadcastLocalUpdate('INVOICE', 'CREATED');
-      toast.success('Tax invoice generated successfully!');
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Error generating invoice');
-    } finally {
-      setIsGeneratingInvoice(false);
+      setIsGeneratingInvoice(true);
+      try {
+        await api.post('/invoices', {
+          customerId: ticket.customer.id,
+          repairTicketId: ticket.id,
+          invoiceType: 'REPAIR',
+          taxRate: Number(taxRate),
+          discountAmount: Number(discountAmount),
+        });
+
+        setShowInvoiceModal(false);
+        setSelectedTicketId('');
+        fetchData();
+        broadcastLocalUpdate('INVOICE', 'CREATED');
+        toast.success('Tax invoice generated successfully!');
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Error generating invoice');
+      } finally {
+        setIsGeneratingInvoice(false);
+      }
+    } else {
+      // Direct Hardware Retail Sale
+      if (!directCustomerId) {
+        toast.error('Please select a customer for the retail sale');
+        return;
+      }
+      if (retailCart.length === 0) {
+        toast.error('Please add at least one hardware item to the invoice');
+        return;
+      }
+
+      setIsGeneratingInvoice(true);
+      try {
+        await api.post('/invoices', {
+          customerId: Number(directCustomerId),
+          repairTicketId: null,
+          invoiceType: 'DIRECT_SALE',
+          taxRate: Number(taxRate),
+          discountAmount: Number(discountAmount),
+          customItems: retailCart.map((it) => ({
+            itemId: it.itemId,
+            itemName: it.name,
+            itemType: 'PART',
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+          })),
+        });
+
+        setShowInvoiceModal(false);
+        setDirectCustomerId('');
+        setRetailCart([]);
+        fetchData();
+        broadcastLocalUpdate('INVOICE', 'CREATED');
+        broadcastLocalUpdate('INVENTORY', 'UPDATED');
+        toast.success('Direct hardware retail invoice generated successfully!');
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Error generating retail invoice');
+      } finally {
+        setIsGeneratingInvoice(false);
+      }
     }
   };
 
@@ -284,6 +412,15 @@ export const Billing: React.FC = () => {
 
   const selectedTicket = tickets.find((t) => t.id === Number(selectedTicketId));
 
+  // Retail sale live calculations
+  const directSubtotal = retailCart.reduce((sum, item) => sum + item.lineTotal, 0);
+  const directDiscountVal = Math.min(directSubtotal, Math.max(0, Number(discountAmount) || 0));
+  const directTaxable = Math.max(0, directSubtotal - directDiscountVal);
+  const directTaxVal = (directTaxable * (Number(taxRate) || 0)) / 100;
+  const directGrandTotal = directTaxable + directTaxVal;
+
+  const selectedInventoryItem = inventoryItems.find((i) => i.id === Number(selectedInventoryId));
+
   const filteredInvoices = invoices.filter((inv) => {
     if (!searchTerm.trim()) return true;
     const term = searchTerm.toLowerCase();
@@ -385,15 +522,34 @@ export const Billing: React.FC = () => {
                   filteredInvoices.map((inv) => (
                     <tr key={inv.id}>
                       <td style={{ fontWeight: 600 }}>
-                        <span
-                          style={{
-                            fontFamily: 'JetBrains Mono, monospace',
-                            fontSize: '0.84rem',
-                            color: 'var(--primary)',
-                          }}
-                        >
-                          {inv.invoiceNumber}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              fontFamily: 'JetBrains Mono, monospace',
+                              fontSize: '0.84rem',
+                              color: 'var(--primary)',
+                            }}
+                          >
+                            {inv.invoiceNumber}
+                          </span>
+                          {inv.invoiceType === 'DIRECT_SALE' ? (
+                            <span
+                              className="badge badge-warning"
+                              style={{ fontSize: '0.65rem', padding: '1px 5px', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                              title="Direct Hardware Retail Sale"
+                            >
+                              <ShoppingBag size={10} /> Retail
+                            </span>
+                          ) : (
+                            <span
+                              className="badge badge-outline"
+                              style={{ fontSize: '0.65rem', padding: '1px 5px', display: 'inline-flex', alignItems: 'center', gap: 3 }}
+                              title="Repair Job Ticket Invoice"
+                            >
+                              <Wrench size={10} /> Repair
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td>
                         <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
@@ -488,16 +644,27 @@ export const Billing: React.FC = () => {
               <div key={inv.id} className="mobile-data-card">
                 <div className="mobile-card-header">
                   <div>
-                    <span
-                      style={{
-                        fontFamily: 'JetBrains Mono, monospace',
-                        fontWeight: 700,
-                        color: 'var(--primary)',
-                        fontSize: '0.92rem',
-                      }}
-                    >
-                      {inv.invoiceNumber}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span
+                        style={{
+                          fontFamily: 'JetBrains Mono, monospace',
+                          fontWeight: 700,
+                          color: 'var(--primary)',
+                          fontSize: '0.92rem',
+                        }}
+                      >
+                        {inv.invoiceNumber}
+                      </span>
+                      {inv.invoiceType === 'DIRECT_SALE' ? (
+                        <span className="badge badge-warning" style={{ fontSize: '0.65rem', padding: '1px 5px' }}>
+                          Retail
+                        </span>
+                      ) : (
+                        <span className="badge badge-outline" style={{ fontSize: '0.65rem', padding: '1px 5px' }}>
+                          Repair
+                        </span>
+                      )}
+                    </div>
                     <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginTop: 2, fontSize: '0.9rem' }}>
                       {inv.customer.fullName}
                     </div>
@@ -568,81 +735,285 @@ export const Billing: React.FC = () => {
       {/* MODAL 1: GENERATE INVOICE */}
       <Modal
         isOpen={showInvoiceModal}
-        onClose={() => setShowInvoiceModal(false)}
-        title="Generate Tax Invoice"
-        description="Select an available repair ticket to compute parts and labor charges"
-        maxWidth={600}
+        onClose={() => {
+          setShowInvoiceModal(false);
+          setRetailCart([]);
+          setSelectedInventoryId('');
+          setDirectCustomerId('');
+        }}
+        title={invoiceTypeMode === 'REPAIR' ? 'Generate Repair Tax Invoice' : 'Generate Hardware Retail Invoice'}
+        description={
+          invoiceTypeMode === 'REPAIR'
+            ? 'Select an available repair ticket to compute parts and labor charges'
+            : 'Sell computer components, peripherals, and standalone hardware from inventory'
+        }
+        maxWidth={invoiceTypeMode === 'DIRECT_SALE' ? 680 : 600}
       >
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, borderBottom: '1px solid var(--border-default)', paddingBottom: 12 }}>
+          <button
+            type="button"
+            onClick={() => setInvoiceTypeMode('REPAIR')}
+            className={`btn btn-sm ${invoiceTypeMode === 'REPAIR' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <Wrench size={14} />
+            <span>Repair Job Invoice</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setInvoiceTypeMode('DIRECT_SALE')}
+            className={`btn btn-sm ${invoiceTypeMode === 'DIRECT_SALE' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <ShoppingBag size={14} />
+            <span>Direct Hardware Sale</span>
+          </button>
+        </div>
+
         <form onSubmit={handleCreateInvoice}>
-          <div className="form-group">
-            <label className="form-label">
-              Select Repair Ticket <span className="required-mark">*</span>
-            </label>
-            <select
-              className="form-control"
-              required
-              value={selectedTicketId}
-              onChange={(e) => setSelectedTicketId(e.target.value ? Number(e.target.value) : '')}
-              autoFocus
-            >
-              <option value="">
-                {billableTickets.length > 0
-                  ? `-- Choose Billable Ticket (${billableTickets.length} Available) --`
-                  : '-- No Pending Billable Tickets Available --'}
-              </option>
-              {billableTickets.map((t) => (
-                <option key={t.id} value={t.id}>
-                  #{t.ticketNumber} — {t.customer?.fullName || 'Customer'} ({t.device?.brand || ''} {t.device?.modelName || 'Device'}) • ₹{Number(t.estimatedCost || 0).toLocaleString('en-IN')} [{t.status.replace(/_/g, ' ')}]
-                </option>
-              ))}
-            </select>
-            {billableTickets.length === 0 && (
+          {invoiceTypeMode === 'REPAIR' ? (
+            <>
+              <div className="form-group">
+                <label className="form-label">
+                  Select Repair Ticket <span className="required-mark">*</span>
+                </label>
+                <select
+                  className="form-control"
+                  required
+                  value={selectedTicketId}
+                  onChange={(e) => setSelectedTicketId(e.target.value ? Number(e.target.value) : '')}
+                  autoFocus
+                >
+                  <option value="">
+                    {billableTickets.length > 0
+                      ? `-- Choose Billable Ticket (${billableTickets.length} Available) --`
+                      : '-- No Pending Billable Tickets Available --'}
+                  </option>
+                  {billableTickets.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      #{t.ticketNumber} — {t.customer?.fullName || 'Customer'} ({t.device?.brand || ''} {t.device?.modelName || 'Device'}) • ₹{Number(t.estimatedCost || 0).toLocaleString('en-IN')} [{t.status.replace(/_/g, ' ')}]
+                    </option>
+                  ))}
+                </select>
+                {billableTickets.length === 0 && (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      padding: '8px 12px',
+                      background: 'var(--status-info-bg)',
+                      border: '1px solid var(--border-default)',
+                      borderRadius: 8,
+                      fontSize: '0.80rem',
+                      color: 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <AlertCircle size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
+                    <span>All active repair tickets are already invoiced or none are pending billing.</span>
+                  </div>
+                )}
+              </div>
+
+              {selectedTicket && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: '12px 14px',
+                    background: 'rgba(0, 113, 227, 0.05)',
+                    border: '1px solid rgba(0, 113, 227, 0.2)',
+                    borderRadius: 10,
+                    fontSize: '0.84rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                      {selectedTicket.device?.brand} {selectedTicket.device?.modelName}
+                    </span>
+                    <span className="badge badge-outline" style={{ fontSize: '0.72rem' }}>
+                      {selectedTicket.status.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 6, color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
+                    <div>Customer: <b style={{ color: 'var(--text-primary)' }}>{selectedTicket.customer?.fullName}</b></div>
+                    <div>Phone: <b style={{ color: 'var(--text-primary)' }}>{selectedTicket.customer?.phone}</b></div>
+                    <div>Labor Fee: <b style={{ color: 'var(--text-primary)' }}>₹{Number(selectedTicket.laborCharge || 0).toFixed(2)}</b></div>
+                    <div>Estimated: <b style={{ color: 'var(--text-primary)' }}>₹{Number(selectedTicket.estimatedCost || 0).toFixed(2)}</b></div>
+                  </div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {/* DIRECT HARDWARE SALE MODE */}
+              <div className="form-group">
+                <label className="form-label">
+                  Customer <span className="required-mark">*</span>
+                </label>
+                <select
+                  className="form-control"
+                  required
+                  value={directCustomerId}
+                  onChange={(e) => setDirectCustomerId(e.target.value ? Number(e.target.value) : '')}
+                >
+                  <option value="">-- Choose Customer for Direct Hardware Sale --</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.fullName} — {c.phone} {c.address ? `(${c.address})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Hardware Selection Section */}
               <div
                 style={{
-                  marginTop: 8,
-                  padding: '8px 12px',
+                  marginBottom: 16,
+                  padding: '12px 14px',
                   background: 'var(--status-info-bg)',
                   border: '1px solid var(--border-default)',
-                  borderRadius: 8,
-                  fontSize: '0.80rem',
-                  color: 'var(--text-secondary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
+                  borderRadius: 10,
                 }}
               >
-                <AlertCircle size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
-                <span>All active repair tickets are already invoiced or none are pending billing.</span>
-              </div>
-            )}
-          </div>
+                <div style={{ fontSize: '0.80rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Package size={14} color="var(--primary)" />
+                  <span>Add Hardware / Peripheral from Inventory Catalog</span>
+                </div>
 
-          {selectedTicket && (
-            <div
-              style={{
-                marginBottom: 16,
-                padding: '12px 14px',
-                background: 'rgba(0, 113, 227, 0.05)',
-                border: '1px solid rgba(0, 113, 227, 0.2)',
-                borderRadius: 10,
-                fontSize: '0.84rem',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {selectedTicket.device?.brand} {selectedTicket.device?.modelName}
-                </span>
-                <span className="badge badge-outline" style={{ fontSize: '0.72rem' }}>
-                  {selectedTicket.status.replace(/_/g, ' ')}
-                </span>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1.8fr) minmax(70px, 0.7fr) minmax(90px, 0.9fr) auto', gap: 8, alignItems: 'end' }}>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.72rem' }}>Hardware Item</label>
+                    <select
+                      className="form-control"
+                      value={selectedInventoryId}
+                      onChange={(e) => {
+                        const id = e.target.value ? Number(e.target.value) : '';
+                        setSelectedInventoryId(id);
+                        const item = inventoryItems.find((it) => it.id === id);
+                        if (item) {
+                          setCustomPrice(String(item.sellingPrice));
+                        }
+                      }}
+                    >
+                      <option value="">-- Select Hardware Item --</option>
+                      {inventoryItems
+                        .filter((it) => it.isActive)
+                        .map((it) => (
+                          <option key={it.id} value={it.id} disabled={it.currentStock <= 0}>
+                            {it.name} ({it.sku}) • Stock: {it.currentStock} • ₹{Number(it.sellingPrice).toFixed(2)} {it.currentStock <= 0 ? '(Out of Stock)' : ''}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.72rem' }}>Qty</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={selectedInventoryItem ? selectedInventoryItem.currentStock : 999}
+                      className="form-control"
+                      value={selectedQty}
+                      onChange={(e) => setSelectedQty(Math.max(1, parseInt(e.target.value) || 1))}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.72rem' }}>Rate (₹)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      className="form-control"
+                      value={customPrice}
+                      onChange={(e) => setCustomPrice(e.target.value)}
+                      placeholder="0.00"
+                    />
+                  </div>
+
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleAddRetailItem}
+                    disabled={!selectedInventoryId}
+                    style={{ height: 38, padding: '0 12px' }}
+                    title="Add item to hardware invoice"
+                  >
+                    <Plus size={15} />
+                    <span>Add</span>
+                  </button>
+                </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 6, color: 'var(--text-secondary)', fontSize: '0.78rem' }}>
-                <div>Customer: <b style={{ color: 'var(--text-primary)' }}>{selectedTicket.customer?.fullName}</b></div>
-                <div>Phone: <b style={{ color: 'var(--text-primary)' }}>{selectedTicket.customer?.phone}</b></div>
-                <div>Labor Fee: <b style={{ color: 'var(--text-primary)' }}>₹{Number(selectedTicket.laborCharge || 0).toFixed(2)}</b></div>
-                <div>Estimated: <b style={{ color: 'var(--text-primary)' }}>₹{Number(selectedTicket.estimatedCost || 0).toFixed(2)}</b></div>
+
+              {/* Hardware Cart List */}
+              <div style={{ marginBottom: 16 }}>
+                <label className="form-label" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Hardware Items in Invoice ({retailCart.length})</span>
+                  {retailCart.length > 0 && (
+                    <span style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                      Subtotal: ₹{directSubtotal.toFixed(2)}
+                    </span>
+                  )}
+                </label>
+
+                {retailCart.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '16px',
+                      border: '1px dashed var(--border-default)',
+                      borderRadius: 8,
+                      textAlign: 'center',
+                      color: 'var(--text-tertiary)',
+                      fontSize: '0.80rem',
+                    }}
+                  >
+                    No hardware items selected yet. Choose an item above and click <b>Add</b>.
+                  </div>
+                ) : (
+                  <div style={{ maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border-default)', borderRadius: 8 }}>
+                    <table style={{ margin: 0, fontSize: '0.82rem' }}>
+                      <thead style={{ background: 'var(--bg-tertiary)' }}>
+                        <tr>
+                          <th>Item</th>
+                          <th>Qty</th>
+                          <th>Rate</th>
+                          <th style={{ textAlign: 'right' }}>Total</th>
+                          <th style={{ width: 40 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {retailCart.map((item, idx) => (
+                          <tr key={idx}>
+                            <td>
+                              <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{item.name}</div>
+                              <div style={{ fontSize: '0.70rem', color: 'var(--text-tertiary)', fontFamily: 'JetBrains Mono, monospace' }}>
+                                {item.sku}
+                              </div>
+                            </td>
+                            <td className="tabular">{item.quantity}</td>
+                            <td className="tabular">₹{item.unitPrice.toFixed(2)}</td>
+                            <td style={{ textAlign: 'right', fontWeight: 600 }} className="tabular">
+                              ₹{item.lineTotal.toFixed(2)}
+                            </td>
+                            <td style={{ textAlign: 'center' }}>
+                              <button
+                                type="button"
+                                className="btn btn-outline btn-sm"
+                                style={{ padding: '3px 6px', color: '#dc2626', borderColor: '#fca5a5' }}
+                                onClick={() => handleRemoveRetailItem(idx)}
+                                title="Remove item"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
-            </div>
+            </>
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 }}>
@@ -670,22 +1041,63 @@ export const Billing: React.FC = () => {
             </div>
           </div>
 
+          {invoiceTypeMode === 'DIRECT_SALE' && retailCart.length > 0 && (
+            <div
+              style={{
+                marginBottom: 16,
+                padding: '10px 14px',
+                background: 'rgba(0, 113, 227, 0.05)',
+                border: '1px solid rgba(0, 113, 227, 0.2)',
+                borderRadius: 8,
+                fontSize: '0.82rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ color: 'var(--text-secondary)' }}>Gross Hardware Subtotal:</span>
+                <span className="tabular">₹{directSubtotal.toFixed(2)}</span>
+              </div>
+              {directDiscountVal > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, color: '#059669' }}>
+                  <span>Discount:</span>
+                  <span className="tabular">-₹{directDiscountVal.toFixed(2)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ color: 'var(--text-secondary)' }}>GST ({taxRate}%):</span>
+                <span className="tabular">₹{directTaxVal.toFixed(2)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid rgba(0, 113, 227, 0.2)', paddingTop: 4, fontWeight: 700, color: 'var(--primary)' }}>
+                <span>Grand Total:</span>
+                <span className="tabular">₹{directGrandTotal.toFixed(2)}</span>
+              </div>
+            </div>
+          )}
+
           <div className="modal-footer">
             <button
               type="button"
               className="btn btn-outline"
-              onClick={() => setShowInvoiceModal(false)}
+              onClick={() => {
+                setShowInvoiceModal(false);
+                setRetailCart([]);
+                setSelectedInventoryId('');
+                setDirectCustomerId('');
+              }}
             >
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary" disabled={isGeneratingInvoice}>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isGeneratingInvoice || (invoiceTypeMode === 'DIRECT_SALE' && retailCart.length === 0)}
+            >
               {isGeneratingInvoice ? (
                 <>
                   <Loader2 size={15} className="spin-fast" />
                   <span>Generating...</span>
                 </>
               ) : (
-                <span>Generate Tax Invoice</span>
+                <span>{invoiceTypeMode === 'REPAIR' ? 'Generate Tax Invoice' : 'Generate Retail Hardware Invoice'}</span>
               )}
             </button>
           </div>
@@ -934,7 +1346,7 @@ export const Billing: React.FC = () => {
                 )}
               </div>
 
-              {viewInvoice.repairTicket && (
+              {viewInvoice.repairTicket ? (
                 <div>
                   <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', fontWeight: 600 }}>
                     Serviced Equipment
@@ -950,6 +1362,19 @@ export const Billing: React.FC = () => {
                       SN: {viewInvoice.repairTicket.device.serialNumber}
                     </div>
                   )}
+                </div>
+              ) : (
+                <div>
+                  <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', fontWeight: 600 }}>
+                    Invoice Type
+                  </div>
+                  <div style={{ fontWeight: 600, fontSize: '0.92rem', color: 'var(--text-primary)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ShoppingBag size={14} color="var(--primary)" />
+                    <span>Direct Hardware & Retail Sale</span>
+                  </div>
+                  <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginTop: 2 }}>
+                    Over-the-Counter Hardware Purchase
+                  </div>
                 </div>
               )}
             </div>
