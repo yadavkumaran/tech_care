@@ -56,7 +56,12 @@ api.interceptors.response.use(
     if (error.response && error.response.status === 401) {
       localStorage.removeItem('techcare_token');
       localStorage.removeItem('techcare_user');
-      if (window.location.pathname !== '/login') {
+      const isPublicRoute =
+        typeof window !== 'undefined' &&
+        (window.location.pathname.startsWith('/pay') ||
+          window.location.pathname.startsWith('/track') ||
+          window.location.pathname === '/login');
+      if (!isPublicRoute) {
         window.location.href = '/login';
       }
     }

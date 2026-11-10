@@ -59,6 +59,7 @@ export const PublicInvoicePay: React.FC = () => {
   const [error, setError] = useState('');
   const [retryStatus, setRetryStatus] = useState('');
   const [payingOnline, setPayingOnline] = useState(false);
+  const [simulatingTest, setSimulatingTest] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
   useEffect(() => {
@@ -176,6 +177,35 @@ export const PublicInvoicePay: React.FC = () => {
       alert(err.response?.data?.message || err.message || 'Error opening payment gateway.');
     } finally {
       setPayingOnline(false);
+    }
+  };
+
+  const handleSimulateTestPayment = async () => {
+    if (!invoice || invoice.balanceAmount <= 0) return;
+    setSimulatingTest(true);
+    try {
+      const verifyRes = await api.post<ApiResponse<any>>(
+        '/public/invoices/payments/razorpay/verify',
+        {
+          invoiceId: invoice.id,
+          razorpayOrderId: 'order_test_' + Date.now(),
+          razorpayPaymentId: 'pay_test_' + Date.now(),
+          razorpaySignature: 'mock_signature',
+          paymentMethod: 'UPI',
+        },
+        { timeout: 60000 }
+      );
+
+      if (verifyRes.data.success) {
+        setPaymentSuccess(true);
+        fetchInvoice(invoice.invoiceNumber);
+      } else {
+        alert(verifyRes.data.message || 'Test payment verification failed');
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Could not verify test payment.');
+    } finally {
+      setSimulatingTest(false);
     }
   };
 
@@ -351,6 +381,32 @@ export const PublicInvoicePay: React.FC = () => {
                   </div>
                   <div style={{ color: '#047857', fontSize: '0.82rem' }}>
                     Thank you! Your payment has been received and credited to your account.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Already Fully Settled Banner */}
+            {invoice.balanceAmount <= 0 && !paymentSuccess && (
+              <div
+                style={{
+                  marginBottom: 16,
+                  padding: '14px 18px',
+                  background: '#f0fdf4',
+                  border: '1px solid #86efac',
+                  borderRadius: 12,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 12,
+                }}
+              >
+                <CheckCircle2 size={24} color="#16a34a" style={{ flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontWeight: 700, color: '#166534', fontSize: '0.94rem' }}>
+                    Invoice Fully Paid & Settled
+                  </div>
+                  <div style={{ color: '#15803d', fontSize: '0.82rem', marginTop: 2 }}>
+                    This invoice was settled in full (Total Paid: ₹{Number(invoice.paidAmount).toFixed(2)}). Balance due is ₹0.00 — no additional payment is required.
                   </div>
                 </div>
               </div>
@@ -611,8 +667,8 @@ export const PublicInvoicePay: React.FC = () => {
               </div>
             </div>
 
-            {/* Action Bar (Razorpay Online Pay or Print) */}
-            <div style={{ marginTop: 20, display: 'flex', gap: 12, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+            {/* Action Bar (Razorpay Online Pay, Test Pay, or Print) */}
+            <div style={{ marginTop: 20, display: 'flex', gap: 12, justifyContent: 'flex-end', flexWrap: 'wrap', alignItems: 'center' }}>
               <button
                 type="button"
                 className="btn btn-outline"
@@ -633,40 +689,110 @@ export const PublicInvoicePay: React.FC = () => {
                 <span>Print Invoice</span>
               </button>
 
-              {invoice.balanceAmount > 0 && (
-                <button
-                  type="button"
-                  disabled={payingOnline}
-                  onClick={handleOnlinePayment}
+              {invoice.balanceAmount <= 0 ? (
+                <div
                   style={{
-                    display: 'flex',
+                    display: 'inline-flex',
                     alignItems: 'center',
-                    gap: 8,
-                    padding: '10px 22px',
+                    gap: 6,
+                    padding: '10px 20px',
                     borderRadius: 10,
-                    fontSize: '0.92rem',
+                    background: '#dcfce7',
+                    color: '#15803d',
                     fontWeight: 700,
-                    color: '#ffffff',
-                    background: 'linear-gradient(135deg, #0071e3 0%, #4f46e5 100%)',
-                    border: 'none',
-                    cursor: 'pointer',
-                    boxShadow: '0 4px 12px rgba(0, 113, 227, 0.3)',
+                    fontSize: '0.90rem',
+                    border: '1px solid #86efac',
                   }}
                 >
-                  {payingOnline ? (
-                    <>
-                      <Loader2 size={16} className="spin-fast" />
-                      <span>Opening Payment Gateway...</span>
-                    </>
-                  ) : (
-                    <>
-                      <CreditCard size={17} />
-                      <span>Pay ₹{Number(invoice.balanceAmount).toFixed(2)} via UPI / Card</span>
-                    </>
-                  )}
-                </button>
+                  <CheckCircle2 size={16} />
+                  <span>Fully Paid & Settled (₹0.00 Due)</span>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    disabled={payingOnline || simulatingTest}
+                    onClick={handleSimulateTestPayment}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '10px 16px',
+                      borderRadius: 10,
+                      fontSize: '0.86rem',
+                      fontWeight: 600,
+                      color: '#0284c7',
+                      background: '#f0f9ff',
+                      border: '1px solid #bae6fd',
+                      cursor: 'pointer',
+                    }}
+                    title="Quick simulated payment test for development/demo"
+                  >
+                    {simulatingTest ? (
+                      <>
+                        <Loader2 size={15} className="spin-fast" />
+                        <span>Verifying Test Pay...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={15} />
+                        <span>Simulate Test UPI</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={payingOnline || simulatingTest}
+                    onClick={handleOnlinePayment}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '10px 22px',
+                      borderRadius: 10,
+                      fontSize: '0.92rem',
+                      fontWeight: 700,
+                      color: '#ffffff',
+                      background: 'linear-gradient(135deg, #0071e3 0%, #4f46e5 100%)',
+                      border: 'none',
+                      cursor: 'pointer',
+                      boxShadow: '0 4px 12px rgba(0, 113, 227, 0.3)',
+                    }}
+                  >
+                    {payingOnline ? (
+                      <>
+                        <Loader2 size={16} className="spin-fast" />
+                        <span>Opening Payment Gateway...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CreditCard size={17} />
+                        <span>Pay ₹{Number(invoice.balanceAmount).toFixed(2)} via UPI / Card</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               )}
             </div>
+
+            {/* Mobile Browser Tip */}
+            {invoice.balanceAmount > 0 && (
+              <div
+                style={{
+                  marginTop: 14,
+                  padding: '10px 14px',
+                  background: '#f8fafc',
+                  border: '1px dashed #cbd5e1',
+                  borderRadius: 10,
+                  fontSize: '0.78rem',
+                  color: '#64748b',
+                  textAlign: 'center',
+                }}
+              >
+                💡 <b>Mobile Tip:</b> If your UPI app (GPay/PhonePe) doesn't launch inside WhatsApp, tap <b>⋮</b> (menu at top right) and choose <b>&quot;Open in Chrome / Browser&quot;</b>.
+              </div>
+            )}
 
             {/* Footer Shop Info */}
             <div style={{ textAlign: 'center', marginTop: 32, fontSize: '0.80rem', color: '#94a3b8' }}>
