@@ -50,6 +50,11 @@ export const Staff: React.FC = () => {
   const [showSettleModal, setShowSettleModal] = useState(false);
   const [payslipModal, setPayslipModal] = useState<SalarySettlement | null>(null);
 
+  // Quick Base Salary Modal State
+  const [salaryModalStaff, setSalaryModalStaff] = useState<User | null>(null);
+  const [quickBaseSalary, setQuickBaseSalary] = useState('0');
+  const [isSavingBaseSalary, setIsSavingBaseSalary] = useState(false);
+
   // Settle Salary Form State
   const [settleStaffId, setSettleStaffId] = useState<number | ''>('');
   const [settleMonth, setSettleMonth] = useState('');
@@ -177,7 +182,7 @@ export const Staff: React.FC = () => {
   const openSettleModal = (staff?: User) => {
     const target = staff || staffList.find((s) => s.isActive) || staffList[0];
     setSettleStaffId(target ? target.id : '');
-    setSettleBase(target && target.baseSalary ? String(target.baseSalary) : '0');
+    setSettleBase(target && target.baseSalary != null ? String(target.baseSalary) : '0');
     setSettleBonus('0');
     setSettleDeductions('0');
     setSettleMonth(getDefaultSalaryMonth());
@@ -188,11 +193,42 @@ export const Staff: React.FC = () => {
     setShowSettleModal(true);
   };
 
-  const handleStaffSelectInSettle = (staffIdNum: number) => {
-    setSettleStaffId(staffIdNum);
-    const found = staffList.find((s) => s.id === staffIdNum);
-    if (found && found.baseSalary) {
-      setSettleBase(String(found.baseSalary));
+  const handleStaffSelectInSettle = (staffIdNum: number | '') => {
+    if (staffIdNum === '' || isNaN(Number(staffIdNum)) || Number(staffIdNum) <= 0) {
+      setSettleStaffId('');
+      return;
+    }
+    const cleanId = Number(staffIdNum);
+    setSettleStaffId(cleanId);
+    const found = staffList.find((s) => s.id === cleanId);
+    if (found) {
+      setSettleBase(found.baseSalary != null ? String(found.baseSalary) : '0');
+    }
+  };
+
+  const openQuickBaseSalaryModal = (staff: User) => {
+    setSalaryModalStaff(staff);
+    setQuickBaseSalary(staff.baseSalary != null ? String(staff.baseSalary) : '0');
+  };
+
+  const handleQuickBaseSalarySubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!salaryModalStaff) return;
+    setIsSavingBaseSalary(true);
+    try {
+      const res = await api.patch<ApiResponse<User>>(`/staff/${salaryModalStaff.id}/base-salary`, {
+        baseSalary: Number(quickBaseSalary || 0),
+      });
+      if (res.data.success) {
+        toast.success(`Base salary for ${salaryModalStaff.fullName} set to ₹${Number(quickBaseSalary || 0).toLocaleString('en-IN')}`);
+        setSalaryModalStaff(null);
+        fetchStaff(false);
+        broadcastLocalUpdate('STAFF', 'UPDATED');
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Failed to update base salary');
+    } finally {
+      setIsSavingBaseSalary(false);
     }
   };
 
@@ -203,8 +239,8 @@ export const Staff: React.FC = () => {
 
   const handleSettleSalarySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!settleStaffId) {
-      toast.error('Please select an employee');
+    if (!settleStaffId || Number(settleStaffId) <= 0) {
+      toast.error('Please select an active employee from the list');
       return;
     }
     if (!settleMonth.trim()) {
@@ -222,7 +258,7 @@ export const Staff: React.FC = () => {
         deductions: Number(settleDeductions || 0),
         paymentMethod: settleMethod,
         transactionRef: settleRef.trim() || undefined,
-        paymentDate: settleDate,
+        paymentDate: settleDate || new Date().toISOString().split('T')[0],
         notes: settleNotes.trim() || undefined,
       });
 
@@ -519,11 +555,22 @@ export const Staff: React.FC = () => {
                               </Badge>
                             </td>
                             <td>
-                              <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
-                                ₹{Number(u.baseSalary || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
-                                <span style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', fontWeight: 400, marginLeft: 4 }}>
-                                  / mo
-                                </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '0.88rem' }}>
+                                  ₹{Number(u.baseSalary || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                                  <span style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', fontWeight: 400, marginLeft: 4 }}>
+                                    / mo
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-xs"
+                                  title="Quick Set Base Salary"
+                                  onClick={() => openQuickBaseSalaryModal(u)}
+                                  style={{ padding: '2px 4px', color: 'var(--primary)' }}
+                                >
+                                  <Edit size={12} />
+                                </button>
                               </div>
                             </td>
                             <td>
@@ -1138,8 +1185,15 @@ export const Staff: React.FC = () => {
               <select
                 className="form-control"
                 required
-                value={settleStaffId}
-                onChange={(e) => handleStaffSelectInSettle(Number(e.target.value))}
+                value={settleStaffId !== '' ? String(settleStaffId) : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!val) {
+                    setSettleStaffId('');
+                  } else {
+                    handleStaffSelectInSettle(Number(val));
+                  }
+                }}
               >
                 <option value="">-- Choose Employee --</option>
                 {staffList.filter((s) => s.isActive).map((s) => (
@@ -1297,6 +1351,63 @@ export const Staff: React.FC = () => {
                 </>
               ) : (
                 <span>Confirm & Settle ₹{calculatedNetSalary.toLocaleString('en-IN')}</span>
+              )}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* QUICK SET BASE SALARY MODAL */}
+      <Modal
+        isOpen={Boolean(salaryModalStaff)}
+        onClose={() => setSalaryModalStaff(null)}
+        title={`Set Base Salary: ${salaryModalStaff?.fullName || ''}`}
+        description="Update official monthly baseline payroll for this employee"
+        maxWidth={440}
+      >
+        <form onSubmit={handleQuickBaseSalarySubmit}>
+          <div className="form-group">
+            <label className="form-label">Monthly Base Salary (₹) <span className="required-mark">*</span></label>
+            <div style={{ position: 'relative' }}>
+              <IndianRupee size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                required
+                className="form-control"
+                style={{ paddingLeft: 30 }}
+                placeholder="e.g. 25000"
+                value={quickBaseSalary}
+                onChange={(e) => setQuickBaseSalary(e.target.value)}
+                autoFocus
+              />
+            </div>
+            <span style={{ fontSize: '0.74rem', color: 'var(--text-tertiary)', marginTop: 4, display: 'block' }}>
+              This default amount is auto-populated whenever settling monthly salary for this employee.
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18, borderTop: '1px solid var(--border-default)', paddingTop: 14 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              onClick={() => setSalaryModalStaff(null)}
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isSavingBaseSalary}
+            >
+              {isSavingBaseSalary ? (
+                <>
+                  <Loader2 size={15} className="spin-fast" />
+                  <span>Saving...</span>
+                </>
+              ) : (
+                <span>Save Base Salary</span>
               )}
             </button>
           </div>

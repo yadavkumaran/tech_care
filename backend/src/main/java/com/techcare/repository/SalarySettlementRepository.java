@@ -27,4 +27,7 @@ public interface SalarySettlementRepository extends JpaRepository<SalarySettleme
 
     @Query("SELECT COALESCE(SUM(s.netSalary), 0) FROM SalarySettlement s WHERE s.status = 'PAID'")
     BigDecimal sumAllNetSalary();
+
+    @Query("SELECT COUNT(s) FROM SalarySettlement s WHERE s.paymentDate BETWEEN :start AND :end AND s.status = 'PAID'")
+    long countSettlementsBetween(@Param("start") LocalDate start, @Param("end") LocalDate end);
 }

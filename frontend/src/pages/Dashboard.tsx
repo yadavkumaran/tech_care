@@ -41,26 +41,27 @@ export const Dashboard: React.FC = () => {
   const outletContext = useOutletContext<LayoutContextType | null>();
 
   const isAdmin = hasRole('ADMIN');
-  const isTechnician = hasRole('TECHNICIAN') && !isAdmin;
+  const canViewFinancials = hasRole('ADMIN') || hasRole('RECEPTIONIST');
+  const isTechnician = hasRole('TECHNICIAN') && !isAdmin && !hasRole('RECEPTIONIST');
   const isReceptionist = hasRole('RECEPTIONIST') && !isAdmin;
   const [techFilter, setTechFilter] = useState<'ONGOING' | 'READY' | 'ALL'>('ONGOING');
 
-  // Admin Financial Analytics State
+  // Admin & Store Manager Financial Analytics State
   const [financialPeriod, setFinancialPeriod] = useState<'TODAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'ALL_TIME'>('THIS_MONTH');
   const [financialData, setFinancialData] = useState<FinancialAnalytics | null>(null);
   const [financialLoading, setFinancialLoading] = useState(false);
 
   useEffect(() => {
     fetchStats();
-    if (isAdmin) {
+    if (canViewFinancials) {
       fetchFinancialAnalytics(financialPeriod);
     }
-  }, [isAdmin, financialPeriod]);
+  }, [canViewFinancials, financialPeriod]);
 
   // Real-time synchronization: refresh dashboard metrics when any workshop, billing, staff, or inventory event occurs
   useRealtimeSync(['TICKET', 'INVOICE', 'PAYMENT', 'INVENTORY', 'STAFF'], () => {
     fetchStats();
-    if (isAdmin) {
+    if (canViewFinancials) {
       fetchFinancialAnalytics(financialPeriod);
     }
   });
@@ -388,8 +389,8 @@ export const Dashboard: React.FC = () => {
               </Link>
             </div>
           </div>
-        ) : isAdmin ? (
-          /* EXECUTIVE FINANCIAL PROFIT & COMPARISON ANALYTICS (ADMIN ONLY) */
+        ) : canViewFinancials ? (
+          /* EXECUTIVE FINANCIAL PROFIT & COMPARISON ANALYTICS */
           <div style={{ marginBottom: 24 }}>
             {/* Header with Period Selectors */}
             <div

@@ -12,6 +12,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Service
@@ -21,6 +22,7 @@ public class StaffService {
     private final UserRepository userRepository;
     private final RepairTicketRepository ticketRepository;
     private final PasswordEncoder passwordEncoder;
+    private final SyncNotificationService syncService;
 
     @Transactional(readOnly = true)
     public List<User> getAllStaff() {
@@ -109,6 +111,15 @@ public class StaffService {
         }
 
         return userRepository.save(user);
+    }
+
+    @Transactional
+    public User updateBaseSalary(Long id, BigDecimal baseSalary) {
+        User user = getStaffById(id);
+        user.setBaseSalary(baseSalary != null ? baseSalary : java.math.BigDecimal.ZERO);
+        User saved = userRepository.save(user);
+        syncService.publishEvent("STAFF", "UPDATED", saved.getId(), saved.getFullName(), "Admin");
+        return saved;
     }
 
     @Transactional

@@ -21,7 +21,7 @@ public class StaffController {
     private final StaffService staffService;
 
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<List<User>>> getAllStaff() {
         return ResponseEntity.ok(ApiResponse.success(staffService.getAllStaff()));
     }
@@ -32,13 +32,13 @@ public class StaffController {
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<User>> getStaffById(@PathVariable Long id) {
         return ResponseEntity.ok(ApiResponse.success(staffService.getStaffById(id)));
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<User>> createStaff(@Valid @RequestBody StaffRequest request) {
         User created = staffService.createStaff(request);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -46,12 +46,22 @@ public class StaffController {
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<User>> updateStaff(
             @PathVariable Long id,
             @Valid @RequestBody StaffRequest request) {
         User updated = staffService.updateStaff(id, request);
         return ResponseEntity.ok(ApiResponse.success("Staff member updated successfully", updated));
+    }
+
+    @PatchMapping("/{id}/base-salary")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
+    public ResponseEntity<ApiResponse<User>> updateBaseSalary(
+            @PathVariable Long id,
+            @RequestBody java.util.Map<String, java.math.BigDecimal> payload) {
+        java.math.BigDecimal baseSalary = payload.get("baseSalary");
+        User updated = staffService.updateBaseSalary(id, baseSalary);
+        return ResponseEntity.ok(ApiResponse.success("Base salary updated successfully", updated));
     }
 
     @DeleteMapping("/{id}")

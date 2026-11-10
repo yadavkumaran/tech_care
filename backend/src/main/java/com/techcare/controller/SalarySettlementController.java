@@ -26,20 +26,20 @@ public class SalarySettlementController {
     private final UserRepository userRepository;
 
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<List<SalarySettlementResponse>>> getAllSettlements() {
         return ResponseEntity.ok(ApiResponse.success(salaryService.getAllSettlements()));
     }
 
     @GetMapping("/staff/{staffId}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<List<SalarySettlementResponse>>> getSettlementsByStaff(
             @PathVariable Long staffId) {
         return ResponseEntity.ok(ApiResponse.success(salaryService.getSettlementsByStaff(staffId)));
     }
 
     @PostMapping("/settle")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<SalarySettlementResponse>> settleSalary(
             @Valid @RequestBody SalarySettlementRequest request,
             @AuthenticationPrincipal UserDetailsImpl userDetails) {
@@ -50,7 +50,7 @@ public class SalarySettlementController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<Void>> deleteSettlement(@PathVariable Long id) {
         salaryService.deleteSettlement(id);
         return ResponseEntity.ok(ApiResponse.success("Salary settlement record removed", null));

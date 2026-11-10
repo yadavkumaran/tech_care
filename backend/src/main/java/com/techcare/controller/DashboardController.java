@@ -36,7 +36,7 @@ public class DashboardController {
     }
 
     @GetMapping("/financial-analytics")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'RECEPTIONIST')")
     public ResponseEntity<ApiResponse<FinancialAnalyticsResponse>> getFinancialAnalytics(
             @RequestParam(required = false, defaultValue = "THIS_MONTH") String period) {
         return ResponseEntity.ok(ApiResponse.success(dashboardService.getFinancialAnalytics(period)));

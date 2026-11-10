@@ -6,10 +6,12 @@ import com.techcare.entity.Invoice;
 import com.techcare.entity.InvoiceItem;
 import com.techcare.entity.RepairTicket;
 import com.techcare.entity.User;
+import com.techcare.entity.enums.InvoiceStatus;
 import com.techcare.entity.enums.Role;
 import com.techcare.entity.enums.TicketStatus;
 import com.techcare.repository.*;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,7 @@ import java.util.List;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class DashboardService {
 
     private final RepairTicketRepository ticketRepository;
@@ -134,8 +137,8 @@ public class DashboardService {
         }
 
         List<Invoice> invoices = period.equals("ALL_TIME")
-                ? invoiceRepository.findAllInvoicesWithItems()
-                : invoiceRepository.findInvoicesWithItemsBetween(start, end);
+                ? invoiceRepository.findAllInvoicesWithItems(InvoiceStatus.CANCELLED)
+                : invoiceRepository.findInvoicesWithItemsBetween(start, end, InvoiceStatus.CANCELLED);
 
         BigDecimal totalRevenue = BigDecimal.ZERO;
         BigDecimal serviceRevenue = BigDecimal.ZERO;
@@ -143,8 +146,9 @@ public class DashboardService {
         BigDecimal cogs = BigDecimal.ZERO;
 
         for (Invoice inv : invoices) {
-            totalRevenue = totalRevenue.add(inv.getTotalAmount());
-            if (inv.getItems() != null) {
+            BigDecimal invTotal = inv.getTotalAmount() != null ? inv.getTotalAmount() : BigDecimal.ZERO;
+            totalRevenue = totalRevenue.add(invTotal);
+            if (inv.getItems() != null && !inv.getItems().isEmpty()) {
                 for (InvoiceItem item : inv.getItems()) {
                     BigDecimal itemTotal = item.getTotalPrice() != null ? item.getTotalPrice() : BigDecimal.ZERO;
                     if ("LABOR".equalsIgnoreCase(item.getItemType())) {
@@ -158,6 +162,9 @@ public class DashboardService {
                         }
                     }
                 }
+            } else {
+                // If an invoice has no discrete line items recorded, allocate to service revenue
+                serviceRevenue = serviceRevenue.add(invTotal);
             }
         }
 
@@ -166,22 +173,42 @@ public class DashboardService {
                 ? (grossProfit.divide(totalRevenue, 4, RoundingMode.HALF_UP).doubleValue() * 100.0)
                 : 0.0;
 
-        BigDecimal salaryExpenses = period.equals("ALL_TIME")
-                ? salaryRepository.sumAllNetSalary()
-                : salaryRepository.sumNetSalaryBetween(start, end);
-        if (salaryExpenses == null) salaryExpenses = BigDecimal.ZERO;
+        BigDecimal salaryExpenses = BigDecimal.ZERO;
+        long settledSalariesCount = 0;
+        try {
+            salaryExpenses = period.equals("ALL_TIME")
+                    ? salaryRepository.sumAllNetSalary()
+                    : salaryRepository.sumNetSalaryBetween(start, end);
+            if (salaryExpenses == null) salaryExpenses = BigDecimal.ZERO;
 
-        BigDecimal purchaseExpenses = period.equals("ALL_TIME")
-                ? purchaseRepository.sumAllPurchases()
-                : purchaseRepository.sumPurchasesBetween(start, end);
-        if (purchaseExpenses == null) purchaseExpenses = BigDecimal.ZERO;
+            settledSalariesCount = period.equals("ALL_TIME")
+                    ? salaryRepository.count()
+                    : salaryRepository.countSettlementsBetween(start, end);
+        } catch (Exception e) {
+            log.warn("Could not query salary settlements for analytics: {}", e.getMessage());
+        }
+
+        BigDecimal purchaseExpenses = BigDecimal.ZERO;
+        try {
+            purchaseExpenses = period.equals("ALL_TIME")
+                    ? purchaseRepository.sumAllPurchases()
+                    : purchaseRepository.sumPurchasesBetween(start, end);
+            if (purchaseExpenses == null) purchaseExpenses = BigDecimal.ZERO;
+        } catch (Exception e) {
+            log.warn("Could not query purchase expenses for analytics: {}", e.getMessage());
+        }
 
         BigDecimal netProfit = grossProfit.subtract(salaryExpenses);
         double netMarginPercent = totalRevenue.compareTo(BigDecimal.ZERO) > 0
                 ? (netProfit.divide(totalRevenue, 4, RoundingMode.HALF_UP).doubleValue() * 100.0)
                 : 0.0;
 
-        BigDecimal totalReceivables = invoiceRepository.calculateTotalOutstandingReceivables();
+        BigDecimal totalReceivables = BigDecimal.ZERO;
+        try {
+            totalReceivables = invoiceRepository.calculateTotalOutstandingReceivables();
+        } catch (Exception e) {
+            log.warn("Could not calculate outstanding receivables: {}", e.getMessage());
+        }
 
         return FinancialAnalyticsResponse.builder()
                 .period(period)
@@ -199,7 +226,7 @@ public class DashboardService {
                 .netMarginPercent(Math.round(netMarginPercent * 10.0) / 10.0)
                 .totalReceivables(totalReceivables != null ? totalReceivables : BigDecimal.ZERO)
                 .totalInvoices(invoices.size())
-                .settledSalariesCount(0)
+                .settledSalariesCount((int) settledSalariesCount)
                 .build();
     }
 }

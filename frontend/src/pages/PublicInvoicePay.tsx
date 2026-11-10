@@ -57,6 +57,7 @@ export const PublicInvoicePay: React.FC = () => {
   const [invoice, setInvoice] = useState<PublicInvoice | null>(null);
   const [loading, setLoading] = useState(Boolean(paramInvoiceNumber?.trim()));
   const [error, setError] = useState('');
+  const [retryStatus, setRetryStatus] = useState('');
   const [payingOnline, setPayingOnline] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
@@ -70,18 +71,19 @@ export const PublicInvoicePay: React.FC = () => {
     }
   }, [paramInvoiceNumber]);
 
-  const fetchInvoice = async (invNum: string) => {
+  const fetchInvoice = async (invNum: string, attempt = 0) => {
     const cleanNum = invNum.trim().toUpperCase();
     if (!cleanNum) return;
 
     setLoading(true);
     setError('');
+    setRetryStatus('');
     setPaymentSuccess(false);
 
     try {
       const res = await api.get<ApiResponse<PublicInvoice>>(
         `/public/invoices/${encodeURIComponent(cleanNum)}`,
-        { timeout: 60000 }
+        { timeout: 90000 }
       );
       if (res.data.success && res.data.data) {
         setInvoice(res.data.data);
@@ -90,14 +92,25 @@ export const PublicInvoicePay: React.FC = () => {
         setInvoice(null);
       }
     } catch (err: any) {
-      if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
-        setError('Connection timed out while reaching server. The server is waking up, please tap Retry Loading below.');
+      const isTimeout = err.code === 'ECONNABORTED' || err.message?.includes('timeout') || err.message?.includes('Network Error');
+      if (isTimeout && attempt < 2) {
+        setRetryStatus(`Server is spinning up (attempt ${attempt + 1} of 2)... Retrying in 4 seconds...`);
+        setTimeout(() => {
+          fetchInvoice(cleanNum, attempt + 1);
+        }, 4000);
+        return;
+      }
+
+      if (isTimeout) {
+        setError('Connection timed out while reaching server. The cloud server may have been sleeping — please tap Retry Loading below.');
       } else {
         setError(err.response?.data?.message || `Invoice #${cleanNum} not found or link has expired.`);
       }
       setInvoice(null);
     } finally {
-      setLoading(false);
+      if (!retryStatus) {
+        setLoading(false);
+      }
     }
   };
 
@@ -275,8 +288,12 @@ export const PublicInvoicePay: React.FC = () => {
             <div style={{ color: 'var(--text-primary, #1e293b)', fontWeight: 600, fontSize: '0.95rem' }}>
               Retrieving invoice details...
             </div>
-            <div style={{ color: 'var(--text-secondary, #64748b)', fontSize: '0.80rem', marginTop: 4 }}>
-              Connecting to secure payment gateway... (First request may take a few seconds)
+            <div style={{ color: 'var(--text-secondary, #64748b)', fontSize: '0.82rem', marginTop: 6, maxWidth: 380, margin: '6px auto 0', lineHeight: 1.4 }}>
+              {retryStatus ? (
+                <span style={{ color: '#0284c7', fontWeight: 600 }}>{retryStatus}</span>
+              ) : (
+                <span>Connecting to payment gateway... First request may take 20–30s if cloud server is waking up.</span>
+              )}
             </div>
           </div>
         )}
